@@ -83,7 +83,7 @@ for owl in $owls; do
   dir=$(dirname "$out/$owl")
   n=$({ ls "$dir/previews" 2>/dev/null || true; } | wc -l | tr -d ' ')
   if [ "$n" -lt 22 ]; then
-    echo "- 🎨 \`$(basename "$dir")\` has $n of the 22 themed previews; on an emulator, render them with omarchy-proot's \`scripts/store-previews.sh <this repo> $(basename "$dir")\`"
+    echo "- 🎨 \`$(basename "$dir")\` has $n of the 22 themed previews; on an emulator, render them with Pilot OS's \`scripts/store-previews.sh <this repo> $(basename "$dir")\`"
   fi
 done
 echo "$owls" | tr ' ' '\n' | grep . > "$out/owls.txt" || true

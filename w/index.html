@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Shared widget</title>
+<title>Shared widget · Pilot OS</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='18 18 72 72'%3E%3Cdefs%3E%3ClinearGradient id='bg' gradientUnits='userSpaceOnUse' x1='18' y1='18' x2='90' y2='90'%3E%3Cstop offset='0' stop-color='%23262b40'/%3E%3Cstop offset='1' stop-color='%230e1018'/%3E%3C/linearGradient%3E%3ClinearGradient id='mark' gradientUnits='userSpaceOnUse' x1='36' y1='31' x2='72' y2='78'%3E%3Cstop offset='0' stop-color='%23ffffff'/%3E%3Cstop offset='1' stop-color='%23c9d1e6'/%3E%3C/linearGradient%3E%3CradialGradient id='light' gradientUnits='userSpaceOnUse' cx='52.5' cy='48.5' r='6'%3E%3Cstop offset='0' stop-color='%23ffd27a'/%3E%3Cstop offset='1' stop-color='%23ff7a3d'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect x='0' y='0' width='108' height='108' fill='url(%23bg)'/%3E%3Cpath d='M41,72V38M54,37a13,13 0 1 1 0,26a13,13 0 1 1 0,-26z' fill='none' stroke='url(%23mark)' stroke-width='7.5' stroke-linecap='round'/%3E%3Ccircle cx='54' cy='50' r='4.25' fill='url(%23light)'/%3E%3C/svg%3E">
 <!--
-  Where a shared widget's link lands: https://simonschubert.github.io/omarchy-widgets/w#owl1.<data>,
+  Where a shared widget's link lands: https://bhupas.github.io/pilot-os-widgets/w#owl1.<data>,
   or #dpaste.<id> for one too big for a QR code, uploaded to dpaste.com.
   The data -- the widget file, raw DEFLATE, base64url -- is after the #, so it never reaches this server;
-  this page unpacks it in the browser, shows the file, and hands it to the launcher. The format is
-  Share.kt in omarchy-proot and `omarchy-widgets share` in omarchy-widgets-app.
+  this page unpacks it in the browser, shows the file, and hands it to Pilot OS. The format is
+  Share.kt in Pilot OS and `omarchy-widgets share` in omarchy-widgets-app.
 -->
 <style>
   :root { --bg: #1a1b26; --fg: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --red: #f7768e; --surface: #24283b; }
@@ -49,15 +50,15 @@
     <div class="warn">Only add it if you trust whoever sent it. It runs commands as you, with your files and the network. Read it first: the launcher lists every command before it adds it.</div>
 
     <div class="actions">
-      <a class="button primary" id="open" href="#">Open in Omalauncher</a>
+      <a class="button primary" id="open" href="#">Open in Pilot OS</a>
       <button id="copy">Copy the file</button>
       <a class="button" id="download" download>Download .owl</a>
     </div>
-    <p class="muted" id="android-hint">On Android, the button opens the launcher. Don't have it? <a href="https://play.google.com/store/apps/details?id=dev.omalauncher" style="color: var(--accent)">Omalauncher on Google Play</a>.</p>
+    <p class="muted" id="android-hint">On Android, the button opens Pilot OS, if it's installed.</p>
     <p class="muted">On Omarchy, <button id="import">Copy the import command</button> and run it in a terminal: <code>omarchy-widgets import</code> comes with the <a href="https://github.com/SimonSchubert/omarchy-widgets-app" style="color: var(--accent)">Widgets app</a>.</p>
 
     <pre id="source"></pre>
-    <p class="muted">Widgets are written in OWL: <a href="https://github.com/SimonSchubert/omarchy-widgets/blob/main/docs/LANGUAGE.md" style="color: var(--accent)">the language</a>, and <a href="https://github.com/SimonSchubert/omarchy-widgets" style="color: var(--accent)">the store</a> of reviewed ones.</p>
+    <p class="muted">Widgets are written in OWL: <a href="https://github.com/bhupas/pilot-os-widgets/blob/main/docs/LANGUAGE.md" style="color: var(--accent)">the language</a>, and <a href="https://github.com/bhupas/pilot-os-widgets" style="color: var(--accent)">the store</a> of reviewed ones.</p>
   </section>
 </main>
 <script>
@@ -99,7 +100,7 @@
   // A widget too big for one QR code, uploaded to dpaste.com by the launcher: the link holds only its id.
   // dpaste doesn't let other sites read it, so this page hands the link on to the launcher.
   function paste(id) {
-    document.title = "Shared widget";
+    document.title = "Shared widget · Pilot OS";
     document.getElementById("name").textContent = "A shared widget";
     document.getElementById("info").textContent = "shared with you · on dpaste.com";
     const view = document.createElement("a");
@@ -113,25 +114,27 @@
     document.getElementById("widget").classList.remove("hidden");
   }
 
-  // The launcher catches this link itself once Android trusts it for the domain; until then, and from
+  // Pilot OS catches this link itself once Android trusts it for the domain; until then, and from
   // any browser, an intent: link opens it, passing the data as an extra since it can't keep the fragment.
+  // Without a fallback, Chrome sends a phone that lacks the app to Google Play, which doesn't have Pilot OS:
+  // the fallback is this page, so the user stays here.
   function openIn(data) {
-    const intent = "intent://simonschubert.github.io/omarchy-widgets/w#Intent;scheme=https;package=dev.omalauncher;" +
+    const intent = "intent://bhupas.github.io/pilot-os-widgets/w#Intent;scheme=https;package=dev.pilot_os;" +
       "S.widget=" + encodeURIComponent(data) + ";" +
-      "S.browser_fallback_url=" + encodeURIComponent("https://play.google.com/store/apps/details?id=dev.omalauncher") + ";end";
+      "S.browser_fallback_url=" + encodeURIComponent(location.href) + ";end";
     const android = /Android/i.test(navigator.userAgent);
     const open = document.getElementById("open");
     if (android) open.href = intent;
     else {
       open.classList.add("hidden");
-      document.getElementById("android-hint").textContent = "Scan the code with an Android phone to open it in Omalauncher.";
+      document.getElementById("android-hint").textContent = "Scan the code with an Android phone to open it in Pilot OS.";
     }
   }
 
   // The link in single quotes: base64url and dpaste ids have none, so the shell takes it whole.
   function importCommand(data) {
     document.getElementById("import").onclick = async (ev) => {
-      const cmd = "omarchy-widgets import 'https://simonschubert.github.io/omarchy-widgets/w#" + data + "'";
+      const cmd = "omarchy-widgets import 'https://bhupas.github.io/pilot-os-widgets/w#" + data + "'";
       try { await navigator.clipboard.writeText(cmd); ev.target.textContent = "Copied"; } catch (e) { ev.target.textContent = "Can't copy here"; }
     };
   }
@@ -150,7 +153,7 @@
     const name = (text.match(/widget\s*"([^"]*)"/) || [])[1] || "A widget";
     const size = (text.match(/^\s*size:\s*(\d+x\d+)/m) || [])[1];
     const version = meta(text, "version");
-    document.title = name + " · shared widget";
+    document.title = name + " · shared widget · Pilot OS";
     document.getElementById("name").textContent = name;
     document.getElementById("info").textContent = ["shared with you", version && "v" + version, size, (text.length / 1024).toFixed(1) + " KB"].filter(Boolean).join(" · ");
     document.getElementById("description").textContent = meta(text, "description");

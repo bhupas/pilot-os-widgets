@@ -1,12 +1,27 @@
-# omarchy widgets
+<p align="center"><img src="art/pilot-os.svg" width="96" alt="Pilot OS"></p>
 
-The widget store for [omarchy-proot](https://github.com/SimonSchubert), the Android launcher that
-runs Arch Linux and draws home-screen widgets written in OWL, a small declarative widget language.
+# Pilot OS Widget Store
+
+The reviewed widgets and mini apps that Pilot OS installs from its Store.
+
+## What's here
+
+Pilot OS is an Android home screen that runs a real Arch Linux inside. You make widgets, mini
+apps and web apps by asking an AI agent, and it draws home-screen widgets written in OWL, a small
+declarative widget language. The language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
+
+- A **widget** is a `widget.owl` file: a tile on the home screen, fed by shell commands that run
+  in the phone's Arch system.
+- A **mini app** is an OWL widget with a full-screen `screen { }`, or one saved as a tool.
+
+Both live in `widgets/`, one folder each, and go through the same review.
+
+## Installing widgets
 
 Everything in `widgets/` has been reviewed. When a pull request is merged, CI builds `index.json`
-and publishes the store to GitHub Pages, where the app's **widget store** reads it. Before
-installing, the app shows you every command a widget runs and every package it installs, and it
-checks the download against the reviewed file's SHA-256.
+and publishes the store to GitHub Pages, at https://bhupas.github.io/pilot-os-widgets/, where the
+app's **Store** reads it. Before installing, the app shows you every command a widget runs and
+every package it installs, and it checks the download against the reviewed file's SHA-256.
 
 ## Submitting a widget
 
@@ -29,14 +44,12 @@ By hand:
    ```
 
 3. Optionally add `preview.png`, a screenshot of the tile (under 300 KB). For the store to show
-   the tile in the user's own Omarchy theme, add `previews/<theme>.webp` too, one per theme (under
-   100 KB each, named like `tokyo-night.webp`); the launcher's debug build makes them with
+   the tile in the user's own theme, add `previews/<theme>.webp` too, one per theme (under
+   100 KB each, named like `tokyo-night.webp`); the Pilot OS debug build makes them with
    `scripts/store-previews.sh`.
 4. Check it locally: `java -jar tools/owl.jar review . widgets/<you>/<name>/widget.owl`
 5. Open a pull request. The **review** check runs the same rules and writes a summary of what the
    widget runs and installs; a maintainer reviews it and merges.
-
-The widget language is documented in [docs/LANGUAGE.md](docs/LANGUAGE.md).
 
 ## Rules
 
@@ -61,16 +74,35 @@ Widgets run shell commands inside the phone's Arch system, not with Android perm
 can still read and change files there, and use the network. Reviewers read every command; the
 CI summary lists them all, with anything risky flagged.
 
+## Development
+
+The checks need Java 17 or newer (CI uses 21).
+
+```sh
+java -jar tools/owl.jar index .                                   # build index.json, as CI does before publishing
+java -jar tools/owl.jar review . widgets/<you>/<name>/widget.owl  # check one widget against the rules
+```
+
+`tools/owl.jar` is the language's reference implementation and the checker CI runs. It's built
+from the Pilot OS app repo with `./gradlew :owl:owlJar`, which writes `owl/build/cli/owl.jar`;
+copy that here when the language changes.
+
 ## Layout
 
 ```
 widgets/<author>/<name>/widget.owl    the widget
 widgets/<author>/<name>/preview.png   optional screenshot
-widgets/<author>/<name>/previews/     optional screenshots per Omarchy theme (<theme>.webp)
+widgets/<author>/<name>/previews/     optional screenshots per theme (<theme>.webp)
 order.txt                             the order of the store
 docs/LANGUAGE.md                      the widget language
-w/index.html                          where a shared widget's link lands: shows it, opens the launcher
+w/index.html                          where a shared widget's link lands: shows it, opens Pilot OS
+art/pilot-os.svg                      the Pilot OS icon
 tools/owl.jar                         the checker CI runs (built from the app's owl module)
 runtimes/quickshell/                  OWL for Quickshell on Linux: the same widgets, drawn
                                       by Quickshell (Omarchy Mobile's widget board uses it)
 ```
+
+## Syncing with upstream
+
+This store is a fork of [SimonSchubert/omarchy-widgets](https://github.com/SimonSchubert/omarchy-widgets)
+and takes in its widget changes. [AGENTS.md](AGENTS.md) says how to merge them.

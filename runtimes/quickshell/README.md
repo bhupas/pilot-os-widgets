@@ -70,8 +70,9 @@ must accept and reject the same files with the same messages. CI runs it on
 every change to this folder or to the jar.
 
 The renderer follows the launcher's (`widgets/render/Render.kt` in
-omarchy-proot): Compose's Row and Column measure order and weights, its
-monospace text with Android's line spacing, its default sizes, a 69 dp cell.
+Pilot OS (formerly omarchy-proot)): Compose's Row and Column measure
+order and weights, its monospace text with Android's line spacing, its
+default sizes, a 69 dp cell.
 
 Where it differs, because Android is not here:
 

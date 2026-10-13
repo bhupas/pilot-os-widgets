@@ -7,7 +7,7 @@ error, and so does `.errors/<file>.txt` (runtime problems are appended there
 too), so check that file after saving.
 
 Widgets sit on a 6-column grid of roughly square cells (a phone has about 12
-rows), bordered like Omarchy windows and colored by the current Omarchy
+rows), bordered like Omarchy windows and colored by the user's
 theme. Users move and resize them on the phone. Older `*.json` widgets still
 work.
 
@@ -239,7 +239,7 @@ widget "grok" {
 ## Sharing
 
 The **widget store** (long-press empty space on the home screen) installs reviewed widgets from
-https://github.com/SimonSchubert/omarchy-widgets. To publish one, long-press it, tap **publish**,
+https://github.com/bhupas/pilot-os-widgets. To publish one, long-press it, tap **publish**,
 and the default agent opens a pull request there with the GitHub CLI. The store needs:
 
 - `meta` with a `description` (10-200 characters), a `version` and a `license`, and ideally a `category`:
@@ -253,7 +253,7 @@ The repo's CI checks the rules and summarizes every command for the reviewer. St
 the page you're on; `page:` and `order:` in the file only apply to widgets you add yourself.
 
 To pass a widget on without the store, share it as a link or QR code: the whole file is in it,
-after the `#` of `https://simonschubert.github.io/omarchy-widgets/w#owl1.<data>` (raw DEFLATE, then
+after the `#` of `https://bhupas.github.io/pilot-os-widgets/w#owl1.<data>` (raw DEFLATE, then
 unpadded base64url), so it never reaches a server. One code holds about 2.9 KB of that, which most
 widgets under 6 KB fit. Scanning it opens the launcher, which lists every command the widget runs and
 flags risky ones before it adds it as `shared-<name>.owl`: nobody reviewed it. On Omarchy, the Widgets
