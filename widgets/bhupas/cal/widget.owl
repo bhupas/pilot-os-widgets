@@ -1,0 +1,354 @@
+widget "cal" {
+  meta { owl: 9; icon: "calendar"; description: "The month at a glance, synced with a Google or phone calendar if you like: tap a day for its events, add one at a time or for the day, page through the months."; version: "5.0"; license: "MIT"; category: "time" }
+  size: 3x2
+
+  source now = clock every 60s
+  // The phone's calendars (Google's and those only on the phone), synced by its calendar app: the next two months.
+  source phone = android.calendar
+  state shift = 0                 // months from this one
+  state picked = ""               // the day tapped, yyyy-MM-dd; today until then
+  state events = [] persist       // kept here, while not synced: [{day: "2026-10-11", text, time: "09:30" or "" for the day}]
+  state syncTo = 0 persist        // the phone calendar it syncs with, by id; 0 keeps events here only
+  state timeText = ""             // the event's time as typed: "14:30", "1430", "9"; empty for the whole day
+  state choosing = false          // the calendars to sync with are listed
+  state adding = false            // the event form is open
+  state editing = -1              // the event kept here it changes, by its place in events; -1 for none
+  state editingId = 0             // the phone event it changes, by id; 0 for none
+  state draft = ""                // its title, as typed
+
+  // Date math with fmtTime only. Noon today, so day arithmetic never crosses midnight.
+  let noon = now - num(fmtTime(now, "H")) * 3600 - num(fmtTime(now, "m")) * 60 + 12 * 3600
+  let first = noon - (num(fmtTime(noon, "d")) - 1) * 86400
+  // The middle of the month shift months away, then back to its first day.
+  let mid = first + floor(shift * 30.44 + 15) * 86400
+  let month = mid - (num(fmtTime(mid, "d")) - 1) * 86400
+  let days = 32 - num(fmtTime(month + 31 * 86400, "d"))
+  let lead = (floor(month / 86400) + 3) % 7      // Monday first: 1970-01-01 was a Thursday
+  let today = fmtTime(noon, "yyyy-MM-dd")
+  let sel = picked == "" ? today : picked
+  // The phone's offset from UTC in seconds, from "+0200": all-day events start at midnight UTC.
+  let tz = fmtTime(now, "Z")
+  let offset = (sub(tz, 0, 1) == "-" ? -1 : 1) * (num(sub(tz, 1, 3)) * 3600 + num(sub(tz, 3, 5)) * 60)
+
+  // The calendar it syncs with, while the phone lets it be read: its events (all-day ones moved to the local midnight
+  // they mean, so they land on their day west of UTC too), and new ones go there.
+  let syncCal = (phone.calendars ?? []).find(c => c.id == syncTo)
+  let synced = syncCal == null ? [] : (phone.events ?? []).filter(e => e.calendarId == syncTo).map(e => {id: e.id, recurring: e.recurring, title: e.title, allDay: e.allDay, start: e.allDay ? e.start - offset : e.start, end: e.end, location: e.location})
+  let writes = syncCal != null && phone.canWrite == true
+  // Those kept here, as times: a day's at its midnight.
+  let mine = events.map(e => {i: events.indexOf(e), title: e.text, day: e.day, allDay: (e.time ?? "") == "", start: (e.time ?? "") == "" ? parseTime(e.day, "yyyy-MM-dd") : parseTime("${e.day} ${e.time}", "yyyy-MM-dd HH:mm")})
+  let marked = mine.map(e => e.day) + synced.map(e => fmtTime(e.start, "yyyy-MM-dd"))
+  // The day's events, synced and kept here together: the day's first, then by time.
+  let dayItems = (synced.filter(e => fmtTime(e.start, "yyyy-MM-dd") == sel).map(e => {i: -1, id: e.id, recurring: e.recurring, title: e.title, allDay: e.allDay, start: e.start, sub: e.location})
+    + mine.filter(e => e.day == sel).map(e => {i: e.i, id: null, recurring: false, title: e.title, allDay: e.allDay, start: e.start, sub: null})).sortBy(e => e.allDay ? 0 : e.start)
+  // The form's time, from what's typed: "HH:mm", or "" for the whole day (or while it isn't a time yet).
+  let typed = match(timeText, '^\s*(\d{1,2})(?:[:.\s]?(\d{2}))?\s*$')
+  let hh = typed == null ? -1 : num(typed[0], -1)
+  let mm = typed == null ? 0 : num(typed[1] ?? "0", 0)
+  let at = hh >= 0 && hh < 24 && mm < 60 ? pad(hh, 2, "0") + ":" + pad(mm, 2, "0") : ""
+  let start = at == "" ? parseTime(sel, "yyyy-MM-dd") : parseTime("${sel} ${at}", "yyyy-MM-dd HH:mm")
+
+  // The tile: the coming seven days as a strip, today on the accent and a dot under each day with something on,
+  // then what's next. The date itself is in the clock above.
+  let week = range(7).map(k => noon + k * 86400)
+  let weekDays = week.map(t => fmtTime(t, "yyyy-MM-dd"))
+  // This week's, synced and kept here, soonest first, those over already left out.
+  let thisWeek = synced.filter(e => weekDays.indexOf(fmtTime(e.start, "yyyy-MM-dd")) >= 0)
+    + mine.filter(e => weekDays.indexOf(e.day) >= 0).map(e => {title: e.title, allDay: e.allDay, start: e.start, end: e.allDay ? null : e.start + 3600})
+  let next = thisWeek.filter(e => e.end == null || e.end > now).sortBy(e => e.start).map(e => {
+    title: e.title,
+    day: fmtTime(e.start, "yyyy-MM-dd"),
+    soon: !e.allDay && e.start - now < 3600,
+    when: !e.allDay && e.start <= now ? "Now · until ${fmtTime(e.end, "HH:mm")}" : !e.allDay && e.start - now < 3600 ? "In ${max(round((e.start - now) / 60), 1)} min" : (fmtTime(e.start, "yyyy-MM-dd") == today ? "Today" : fmtTime(e.start, "yyyy-MM-dd") == weekDays[1] ? "Tomorrow" : fmtTime(e.start, "EEEE")) + (e.allDay ? "" : " · " + fmtTime(e.start, "HH:mm"))
+  })
+  let busy = next.map(e => e.day)
+
+  // Small tiles drop the label (2 rows) or the strip (2 columns) and keep what's next.
+  let narrow = (cols ?? 3) < 3
+  let short = (rows ?? 3) < 3
+  let dayCell = clamp(floor(((tileWidth ?? 190) - 24) / 7) - 2, 18, 30)
+
+  Column {
+    gap: 6
+    fill: true
+    if !short && !narrow {
+      Row {
+        align: center
+        Text { text: "CALENDAR"; style: label; color: muted; weight: 1; maxLines: 1 }
+      }
+    }
+    if !narrow {
+      Row {
+        gap: 0
+        for t, k in week {
+          Column {
+            gap: 2
+            weight: 1
+            align: center
+            Text { text: sub(fmtTime(t, "EEE"), 0, 1); style: label; color: k == 0 ? accent : muted; align: center; fill: width; visible: !short }
+            Box {
+              size: dayCell
+              radius: dayCell / 2
+              align: center
+              background: k == 0 ? accent : transparent
+              Text { text: fmtTime(t, "d"); style: small; bold: k == 0; color: k == 0 ? background : foreground; align: center }
+            }
+            Spacer { size: 4; radius: 2; background: busy.indexOf(weekDays[k]) >= 0 ? accent : transparent }
+          }
+        }
+      }
+    }
+    Spacer { weight: 1 }
+    if len(next) == 0 {
+      Text { text: "Nothing planned"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Free all week"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: next[0].title; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: next[0].when; style: small; color: next[0].soon ? accent : muted; maxLines: 1 }
+      // Then as many more as fit: one at 3 rows, two more per row after that.
+      for e in next.drop(1).take(short ? 0 : max((rows ?? 3) * 2 - 5, 1)) {
+        Text { text: "${e.when} · ${e.title}"; style: small; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  // Day cells as wide as a seventh of the screen allows (small phones to tablets), and two columns when there's room.
+  let cell = clamp(floor((screenWidth ?? 328) / 7) - 4, 34, 56)
+  let wide = (screenWidth ?? 0) > 600
+
+  component Month() {
+    Column {
+      gap: 12
+      Row {
+        align: center
+        gap: 6
+        Column {
+          gap: 0
+          weight: 1
+          // One line whatever the month: September is the longest.
+          Text { text: fmtTime(month, "MMMM"); fontSize: (screenWidth ?? 360) < 420 ? 24 : 30; bold: true; maxLines: 1 }
+          Text { text: fmtTime(month, "yyyy"); style: muted }
+        }
+        Text { text: "‹"; fontSize: 20; align: center; width: 48; background: surface; radius: 24; padding: [0, 10]; onTap: shift = shift - 1 }
+        Text { text: "Today"; fontSize: 16; align: center; width: 84; color: shift == 0 && sel == today ? muted : background; background: shift == 0 && sel == today ? surface : accent; radius: 24; padding: [0, 14]; onTap: { shift = 0; picked = "" } }
+        Text { text: "›"; fontSize: 20; align: center; width: 48; background: surface; radius: 24; padding: [0, 10]; onTap: shift = shift + 1 }
+      }
+      Grid {
+        columns: 7
+        gap: 4
+        for d in ["M", "T", "W", "T", "F", "S", "S"] { Text { text: d; style: label; color: muted; align: center } }
+        for i in range(lead + days) {
+          let date = fmtTime(month + (i - lead) * 86400, "yyyy-MM-dd")
+          Box {
+            height: cell; radius: cell / 2; align: center
+            background: i >= lead && date == sel ? accent : transparent
+            border: i >= lead && date == today && date != sel ? 1 : 0; borderColor: accent
+            onTap: picked = i < lead ? picked : date
+            Column {
+              gap: 0
+              align: center
+              Text { text: i < lead ? "" : "${i - lead + 1}"; align: center; color: i >= lead && date == sel ? background : foreground }
+              Spacer { size: 4; radius: 2; background: i >= lead && marked.indexOf(date) >= 0 ? (date == sel ? background : accent) : transparent }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component Day() {
+    Column {
+      gap: 12
+      fill: true
+      Text { text: sel == today ? "Today" : fmtTime(month + (num(sub(sel, 8, 10)) - 1) * 86400, "EEEE d MMMM"); fontSize: 14; bold: true; color: accent; padding: [4, 0, 0, 0] }
+      Box {
+        weight: 1
+        fill: width
+        align: bottomEnd
+        Column {
+          gap: 0
+          fill: true
+          scroll: true
+          background: surface; radius: 28; clip: true
+          for e, n in dayItems {
+            Spacer { height: 1; fill: width; background: border; visible: n > 0 }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              // Into the form, to change or delete it; one of a repeating series in the calendar app, which asks
+              // whether to change just this one.
+              onTap: {
+                if e.recurring {
+                  url("content://com.android.calendar/events/${e.id}")
+                } else {
+                  editing = e.i
+                  editingId = e.id ?? 0
+                  draft = e.title
+                  timeText = e.allDay ? "" : fmtTime(e.start, "HH:mm")
+                  adding = true
+                }
+              }
+              Text { text: e.allDay ? "All day" : fmtTime(e.start, "HH:mm"); fontSize: 16; color: muted; width: 60 }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: e.title; fontSize: 16 }
+                Text { text: e.sub ?? ""; fontSize: 14; color: muted; visible: e.sub != null }
+              }
+            }
+          }
+          if len(dayItems) == 0 { Text { text: "Nothing planned."; fontSize: 16; color: muted; padding: [20, 16] } }
+          // Room at the end, so the add button never covers the last event.
+          Spacer { height: 80 }
+        }
+        // Adding, as Google's apps do: a button over the list's corner, opening the form in a sheet.
+        Box {
+          padding: 16
+          Box {
+            size: 56; radius: 16; align: center; background: accent
+            onTap: { adding = true; editing = -1; editingId = 0; draft = ""; timeText = "" }
+            Text { text: "+"; fontSize: 32; color: background; align: center; fill: width }
+          }
+        }
+      }
+      // What it syncs with; first, the phone's leave to read its calendars.
+      Row {
+        gap: 12
+        align: center
+        padding: [20, 14]
+        background: surface; radius: 24
+        onTap: { launcher(phone.allowed == true ? null : "calendar"); choosing = phone.allowed == true }
+        Text { text: "Sync"; fontSize: 16; weight: 1 }
+        Text { text: phone.allowed != true ? "Allow calendar" : syncCal == null ? "Off" : syncCal.name; fontSize: 16; color: syncCal == null ? muted : accent; maxLines: 1 }
+        Text { text: "›"; fontSize: 18; color: muted }
+      }
+
+      // The calendars to sync with: off (kept here), or one of the phone's, Google's or its own.
+      if choosing {
+        Sheet {
+          title: "Sync with"
+          onDismiss: choosing = false
+          for c in [{id: 0, name: "Off", account: "", kind: "here"}] + (phone.calendars ?? []) {
+            Row {
+              gap: 16
+              align: center
+              padding: [0, 12]
+              onTap: { launcher(c.id == 0 || phone.canWrite == true ? null : "calendar:write"); syncTo = c.id; choosing = false }
+              Box {
+                size: 20; radius: 10; align: center; border: 2; borderColor: c.id == syncTo ? accent : muted
+                Spacer { size: 10; radius: 5; background: c.id == syncTo ? accent : transparent }
+              }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: c.name; fontSize: 16; maxLines: 1 }
+                Text { text: c.kind == "here" ? "Events stay in Cal" : (c.kind == "google" ? "Google" : c.kind == "local" ? "On this phone" : "Synced by the phone") + (c.account != "" && c.account != c.name ? " · " + c.account : ""); fontSize: 14; color: muted; maxLines: 1 }
+              }
+            }
+          }
+        }
+      }
+
+      // The event: its title, then the whole day or a time stepped half an hour at a time. A new one goes into the
+      // calendar synced with, which shows it back, or stays here while not synced.
+      if adding {
+        Sheet {
+          title: editing >= 0 || editingId != 0 ? "Edit event" : "New event"
+          onDismiss: { adding = false; editing = -1; editingId = 0; draft = "" }
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: draft
+              placeholder: "Title"
+              focus: adding
+              onChange: draft = value
+              onSubmit: {
+                draft = value
+                if draft != "" {
+                  if editingId != 0 {
+                    editEvent(editingId, draft, start, null, at == "")
+                  } else if editing >= 0 {
+                    events = events.take(editing) + [{day: sel, text: draft, time: at}] + events.drop(editing + 1)
+                  } else if writes {
+                    addEvent(draft, start, null, at == "", syncTo)
+                  } else {
+                    events = events + [{day: sel, text: draft, time: at}]
+                  }
+                }
+                adding = false; editing = -1; editingId = 0; draft = ""
+              }
+            }
+            // When: the whole day, or a time typed on the number keys (1430 or 14:30), red until it is one.
+            Row {
+              gap: 12
+              align: center
+              Text { text: "All day"; fontSize: 15; color: at == "" ? background : foreground; background: at == "" ? accent : transparent; border: at == "" ? 0 : 1; borderColor: border; radius: 20; padding: [16, 10]; onTap: timeText = "" }
+              Text { text: "or at"; fontSize: 15; color: muted }
+              Input { text: timeText; placeholder: "14:30"; keyboard: "number"; fontSize: 18; width: 96; color: timeText != "" && at == "" ? red : foreground; onChange: timeText = value }
+              Spacer { weight: 1 }
+            }
+            Row {
+              gap: 8
+              align: center
+              if editing >= 0 || editingId != 0 {
+                Text {
+                  text: "Delete"; fontSize: 15; color: red; padding: [8, 12]
+                  onTap: {
+                    if editingId != 0 {
+                      deleteEvent(editingId)
+                    } else {
+                      events = events.take(editing) + events.drop(editing + 1)
+                    }
+                    adding = false; editing = -1; editingId = 0; draft = ""
+                  }
+                }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { adding = false; editing = -1; editingId = 0; draft = "" } }
+              Text {
+                text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  if draft != "" {
+                    if editingId != 0 {
+                      editEvent(editingId, draft, start, null, at == "")
+                    } else if editing >= 0 {
+                      events = events.take(editing) + [{day: sel, text: draft, time: at}] + events.drop(editing + 1)
+                    } else if writes {
+                      addEvent(draft, start, null, at == "", syncTo)
+                    } else {
+                      events = events + [{day: sel, text: draft, time: at}]
+                    }
+                  }
+                  adding = false; editing = -1; editingId = 0; draft = ""
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // The whole tool.
+  screen {
+    title: "cal"
+    Column {
+      gap: 14
+      fill: true
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          weight: 1
+          Month { weight: 1 }
+          Day { weight: 1 }
+        }
+      } else {
+        Month { }
+        Day { weight: 1 }
+      }
+    }
+  }
+}
