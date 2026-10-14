@@ -1,5 +1,5 @@
 widget "exchange rates" {
-  meta { description: "Daily exchange rates from the European Central Bank with a 30-day trend, for the currencies in ~/.config/omarchy-proot/exchange-rates"; version: "1.1"; license: "MIT"; category: "world" }
+  meta { owl: 8; description: "Daily exchange rates from the European Central Bank with a 30-day trend, for the currencies in ~/.config/omarchy-proot/exchange-rates"; version: "1.2"; license: "MIT"; category: "world" }
   size: 6x2
   minSize: 3x2
 
@@ -18,19 +18,152 @@ widget "exchange rates" {
       {base, rates: [$to | split(",")[] | select($now[.]) | {code: ., rate: $now[.], change: (($now[.] / $prev[.] - 1) * 100), hist: [$days[][.]]}]}'
   """) every 1h json timeout 15s
 
-  onTap: terminal('$EDITOR ~/.config/omarchy-proot/exchange-rates', "exchange rates")
+  let rates = fx.rates ?? []
+  let lead = rates[0]
+  // One currency per two columns, so each rate keeps its digits.
+  let shown = rates.take(max(floor((cols ?? 6) / 2), 1))
+  let wide = (screenWidth ?? 0) > 600
 
+  onTap: screen()
+
+  // The tile: each currency as a label, its rate and today's change; the trend when there's room.
   Row {
     gap: 12
-    for c in fx.rates key c.code {
+    fill: true
+    if fx == null || len(rates) == 0 {
+      Column {
+        gap: 2
+        weight: 1
+        Text { text: "EXCHANGE"; style: label; color: muted; maxLines: 1 }
+        Text { text: fx == null ? "…" : "–"; fontSize: 40; maxLines: 1 }
+        Text { text: fx == null ? "Loading rates" : "No rates for these currencies"; style: small; color: muted; maxLines: 1 }
+      }
+    }
+    for c in shown key c.code {
       Column {
         weight: 1
-        gap: 0
-        Text { text: "${fx.base} → ${c.code}"; style: label; maxLines: 1 }
-        Text { text: c.rate >= 100 ? fixed(c.rate, 1) : c.rate >= 10 ? fixed(c.rate, 2) : fixed(c.rate, 4); style: title; maxLines: 1 }
-        Text { text: "${c.change >= 0 ? "+" : ""}${fixed(c.change, 2)}%"; style: small; color: c.change >= 0 ? green : red }
-        Sparkline { values: c.hist; min: min(c.hist); max: max(c.hist); color: accent; fill: width; weight: 1 }
+        gap: 2
+        Text { text: "${fx.base} → ${c.code}"; style: label; color: muted; maxLines: 1 }
+        Text { text: c.rate >= 100 ? fixed(c.rate, 1) : c.rate >= 10 ? fixed(c.rate, 2) : fixed(c.rate, 4); fontSize: len(shown) == 1 ? 40 : 28; maxLines: 1 }
+        Text { text: "${c.change >= 0 ? "+" : ""}${fixed(c.change, 2)}% today"; style: small; color: c.change >= 0 ? green : red; maxLines: 1 }
+        if (rows ?? 2) >= 3 {
+          Sparkline { values: c.hist; min: min(c.hist); max: max(c.hist); color: accent; fill: width; weight: 1 }
+        }
       }
+    }
+  }
+
+  // A currency's row in the screen: code and change, its 30 days, the rate.
+  component RateRow(c) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: c.code; fontSize: 16; bold: true; maxLines: 1 }
+        Text { text: "${c.change >= 0 ? "+" : ""}${fixed(c.change, 2)}% today"; fontSize: 14; color: c.change >= 0 ? green : red; maxLines: 1 }
+      }
+      Sparkline { values: c.hist; min: min(c.hist); max: max(c.hist); color: accent; width: 72; height: 28 }
+      Text { text: c.rate >= 100 ? fixed(c.rate, 1) : c.rate >= 10 ? fixed(c.rate, 2) : fixed(c.rate, 4); fontSize: 16; font: mono; width: 84; align: end; maxLines: 1 }
+    }
+  }
+
+  // The month for each currency: lowest, highest and how far it moved.
+  component MonthRow(c) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: c.code; fontSize: 16; weight: 1; maxLines: 1 }
+      Column {
+        gap: 0
+        align: end
+        Text { text: "${fixed(min(c.hist), 4)} – ${fixed(max(c.hist), 4)}"; fontSize: 14; font: mono; color: muted; maxLines: 1 }
+        Text { text: "${c.rate >= first(c.hist) ? "+" : ""}${fixed((c.rate / first(c.hist) - 1) * 100, 2)}% in 30 days"; fontSize: 14; color: c.rate >= first(c.hist) ? green : red; maxLines: 1 }
+      }
+    }
+  }
+
+  component Today() {
+    Column {
+      gap: 12
+      Text { text: "Today"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for c, i in rates key c.code {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          RateRow { c: c }
+        }
+        if len(rates) == 0 { Text { text: fx == null ? "Loading…" : "No rates: check the currency codes below."; fontSize: 16; color: muted; padding: [20, 16] } }
+      }
+    }
+  }
+
+  component Month() {
+    Column {
+      gap: 12
+      Text { text: "Last 30 days"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for c, i in rates key c.code {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          MonthRow { c: c }
+        }
+      }
+      Text { text: "Currencies"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: terminal('$EDITOR ~/.config/omarchy-proot/exchange-rates', "exchange rates")
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: fx == null ? "…" : "${fx.base} in ${join(rates.map(c => c.code), ", ")}"; fontSize: 16; maxLines: 1 }
+            Text { text: "The base on the first line, then one code a line"; fontSize: 14; color: muted; maxLines: 2 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Text { text: "Rates from the European Central Bank, through Frankfurter, once a working day."; fontSize: 14; color: muted; padding: [8, 0] }
+    }
+  }
+
+  screen {
+    title: "exchange rates"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: lead == null ? "…" : lead.rate >= 100 ? fixed(lead.rate, 2) : fixed(lead.rate, 4); fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: lead == null ? (fx == null ? "Loading rates" : "No rates") : "${lead.code} for 1 ${fx.base} · ${lead.change >= 0 ? "+" : ""}${fixed(lead.change, 2)}% today"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if wide {
+        Row {
+          gap: 12
+          Today { weight: 1 }
+          Month { weight: 1 }
+        }
+      } else {
+        Today { }
+        Month { }
+      }
+      Text { text: "Refresh"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: refresh() }
     }
   }
 }

@@ -1,5 +1,5 @@
 widget "uptime" {
-  meta { description: "Up or down, HTTP status and response time for the sites listed in ~/.config/omarchy-proot/uptime"; version: "1.1"; license: "MIT"; category: "dev" }
+  meta { owl: 8; description: "Up or down, HTTP status and response time for the sites listed in ~/.config/omarchy-proot/uptime"; version: "1.2"; license: "MIT"; category: "dev" }
   size: 6x3
   minSize: 3x2
 
@@ -12,32 +12,95 @@ widget "uptime" {
     [ -f "$f" ] || printf 'https://archlinux.org\nhttps://github.com\n' > "$f"
     grep -v '^#' "$f" | grep . | xargs -P 8 -I{} curl -o /dev/null -s -m 8 -w '%{http_code} %{time_total} {}\n' {}
   """) every 1m timeout 20s
-  // "200 0.31 https://github.com" -> {code, ms, url}
-  let sites = lines(checks).filter(l => l != "").map(l => { code: num(words(l)[0]), ms: round(num(words(l)[1]) * 1000), url: words(l)[2] }).sortBy(s => s.url)
-  let down = count(sites, s => s.code == 0 || s.code >= 400)
+  // "200 0.31 https://github.com" -> {code, ms, url, host, ok}
+  let sites = lines(checks).filter(l => l != "").map(l => { code: num(words(l)[0]), ms: round(num(words(l)[1]) * 1000), url: words(l)[2] })
+    .map(s => { code: s.code, ms: s.ms, url: s.url, host: replace(replace(s.url, "https://", ""), "http://", ""), ok: s.code > 0 && s.code < 400 }).sortBy(s => s.url)
+  let down = count(sites, s => !s.ok)
+  let up = sites.filter(s => s.ok)
+  let avg = len(up) > 0 ? round(sum(up.map(s => s.ms)) / len(up)) : null
+  // The ones that are down first, so a small tile still shows them.
+  let ordered = sites.filter(s => !s.ok) + up
+  let small = (rows ?? 3) < 3
 
-  onTap: terminal('$EDITOR ~/.config/omarchy-proot/uptime', "uptime")
+  onTap: screen()
 
   Column {
-    gap: 4
-    Row {
-      Text { text: "uptime"; style: muted; weight: 1 }
-      Text { text: down > 0 ? "${down} down" : "all up"; fontSize: 12; color: down > 0 ? red : green; width: 80; align: end }
-    }
-    Column {
-      scroll: true
-      weight: 1
-      gap: 4
-      for s in sites key s.url {
-        let ok = s.code > 0 && s.code < 400
+    gap: 2
+    fill: true
+    Text { text: "UPTIME"; style: label; color: muted; maxLines: 1 }
+    Text { text: checks == null ? "…" : len(sites) == 0 ? "No sites" : down > 0 ? "${down} down" : "All up"; fontSize: 40; color: down > 0 ? red : foreground; maxLines: 1 }
+    Text { text: len(sites) == 0 ? "Add sites in the list" : "${len(sites)} site${len(sites) == 1 ? "" : "s"}${avg == null ? "" : " · ${avg} ms average"}"; style: small; color: muted; maxLines: 1 }
+    if !small {
+      Spacer { height: 4 }
+      for s in ordered.take(max(((rows ?? 3) - 2) * 3, 0)) key s.url {
         Row {
           align: center
-          onTap: url(s.url)
-          Box { size: 8; radius: 4; background: ok ? green : red }
-          Text { text: replace(replace(s.url, "https://", ""), "http://", ""); fontSize: 12; maxLines: 1; weight: 1 }
-          Text { text: ok ? "${s.ms} ms" : s.code == 0 ? "timeout" : "${s.code}"; fontSize: 12; color: ok ? muted : red; width: 64; align: end }
+          gap: 8
+          Box { size: 6; radius: 3; background: s.ok ? green : red }
+          Text { text: s.host; style: small; maxLines: 1; weight: 1 }
+          Text { text: s.ok ? "${s.ms} ms" : s.code == 0 ? "timeout" : "${s.code}"; style: small; color: s.ok ? muted : red; maxLines: 1; width: 64; align: end }
         }
       }
+    }
+  }
+
+  screen {
+    title: "uptime"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: checks == null ? "…" : len(sites) == 0 ? "No sites" : down > 0 ? "${down} down" : "All up"; fontSize: 48; bold: true; color: down > 0 ? red : foreground; maxLines: 1 }
+        Text { text: len(sites) == 0 ? "Add the sites to check below" : "${len(sites)} site${len(sites) == 1 ? "" : "s"}${avg == null ? "" : " · ${avg} ms on average"} · checked every minute"; fontSize: 16; color: muted; maxLines: 2 }
+      }
+      Text { text: "Sites"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for s, i in ordered key s.url {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: url(s.url)
+            Box { size: 10; radius: 5; background: s.ok ? green : red }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: s.host; fontSize: 16; maxLines: 1 }
+              Text { text: s.code == 0 ? "No answer in 8 s" : "HTTP ${s.code}"; fontSize: 14; color: s.ok ? muted : red; maxLines: 1 }
+            }
+            Text { text: s.ok ? "${s.ms} ms" : s.code == 0 ? "Timeout" : "Down"; fontSize: 16; color: s.ok ? muted : red; maxLines: 1 }
+          }
+        }
+        if len(sites) == 0 { Text { text: checks == null ? "Checking…" : "Nothing to check yet."; fontSize: 16; color: muted; padding: [20, 16] } }
+      }
+      Text { text: "Settings"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: terminal('$EDITOR ~/.config/omarchy-proot/uptime', "uptime")
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Sites to check"; fontSize: 16; maxLines: 1 }
+            Text { text: "One URL a line, in ~/.config/omarchy-proot/uptime"; fontSize: 14; color: muted; maxLines: 2 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Text { text: "Check now"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: refresh() }
     }
   }
 }

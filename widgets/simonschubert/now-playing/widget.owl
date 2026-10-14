@@ -2,7 +2,7 @@ widget "now-playing" {
   size: 6x2
   minSize: 3x2
   requires { pacman: [] }
-  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile to open the app"; version: "1.2"; license: "MIT"; category: "fun"; owl: 6 }
+  meta { description: "What's playing on your phone, from any music or podcast app: album art, track, progress and play, pause and skip. Tap the tile for the full player"; version: "1.3"; license: "MIT"; category: "fun"; owl: 8 }
 
   // {available, playing, title, artist, album, app, package, position, duration, art}.
   // Android only shares other apps' sessions with notification access; without it, available is false.
@@ -19,7 +19,7 @@ widget "now-playing" {
   let tall = tileWidth != null && tileHeight != null && tileHeight > tileWidth * 1.3
   let tallArt = tall ? clamp(min(tileWidth - 26, tileHeight * 0.45), 40, 240) : 0
 
-  onTap: media("open")
+  onTap: screen()
 
   component Clock(s) {
     Text { text: s == null ? "" : "${floor(s / 60)}:${pad(floor(s % 60), 2, "0")}"; style: label; color: muted; font: mono; maxLines: 1; width: len("${floor(s / 60)}") * 7 + 22 }
@@ -27,9 +27,9 @@ widget "now-playing" {
 
   // Drawn, not glyphs: the launcher's icon font only carries weather symbols. Paths need an
   // explicit fill: to be filled. Play/pause is a solid disc with the glyph in the background color.
-  component Control(kind, big = false) {
+  component Control(kind, big = false, px = 0) {
     Box {
-      size: big ? 38 : 32
+      size: px > 0 ? px : big ? 38 : 32
       onTap: media(kind)
       Canvas {
         let cx = width / 2
@@ -92,16 +92,17 @@ widget "now-playing" {
       if m.playing == true {
         Bars { }
       }
-      Text { text: lower(m.app ?? ""); style: label; color: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
+      Text { text: upper(m.app ?? "now playing"); style: label; color: m.playing == true ? accent : muted; maxLines: 1; weight: 1 }
     }
   }
 
   if !allowed {
     Column {
-      justify: center
-      gap: 6
-      Text { text: "now playing"; style: muted }
-      Text { text: "Allow notification access so the launcher can see what's playing. Tap to open the setting."; style: small; maxLines: 3 }
+      gap: 2
+      fill: true
+      Text { text: "NOW PLAYING"; style: label; color: muted; maxLines: 1 }
+      Text { text: "Allow access"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Tap to let the launcher see what's playing"; style: small; color: muted; maxLines: 2 }
     }
   } else {
     if !has {
@@ -109,8 +110,9 @@ widget "now-playing" {
         Column {
           gap: 10
           Art { src: null; d: tallArt }
-          Text { text: "nothing playing"; style: body; color: muted }
-          Text { text: "start music in any app"; style: small; color: muted; maxLines: 2 }
+          Text { text: "NOW PLAYING"; style: label; color: muted; maxLines: 1 }
+          Text { text: "Nothing playing"; fontSize: 18; bold: true; maxLines: 1 }
+          Text { text: "Start music in any app"; style: small; color: muted; maxLines: 2 }
         }
       } else {
         Row {
@@ -120,8 +122,9 @@ widget "now-playing" {
           Column {
             weight: 1
             gap: 2
-            Text { text: "nothing playing"; style: body; color: muted }
-            Text { text: "start music in any app"; style: small; color: muted; maxLines: 1 }
+            Text { text: "NOW PLAYING"; style: label; color: muted; maxLines: 1 }
+            Text { text: "Nothing playing"; fontSize: 18; bold: true; maxLines: 1 }
+            Text { text: "Start music in any app"; style: small; color: muted; maxLines: 1 }
           }
         }
       }
@@ -180,7 +183,7 @@ widget "now-playing" {
               gap: 4
               if dur > 0 {
                 Clock { s: pos }
-                Text { text: "/"; style: label; color: alpha(muted, 0.5); width: 8 }
+                Text { text: "/"; style: label; color: alpha(muted, 0.5); maxLines: 1 }
                 Clock { s: dur }
               }
               Spacer { weight: 1 }
@@ -190,6 +193,102 @@ widget "now-playing" {
             }
           }
         }
+      }
+    }
+  }
+
+  // The app: the cover big, the track, its progress and the controls, then where it plays.
+  let wide = (screenWidth ?? 0) > 600
+  let cover = clamp(wide ? min((screenWidth ?? 700) / 2 - 40, (screenHeight ?? 600) - 140) : (screenWidth ?? 360) - 48, 160, 420)
+
+  component Item(label, value) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
+    }
+  }
+
+  component Player() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: has ? m.title : "Nothing playing"; fontSize: 28; bold: true; maxLines: 2 }
+        Text { text: has ? m.artist ?? m.app ?? "" : "Start music or a podcast in any app"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if has && dur > 0 {
+        Column {
+          gap: 4
+          Progress { value: pos; max: dur; color: accent; track: alpha(muted, 0.2); fill: width; animate value: tween(900ms, "linear") }
+          Row {
+            align: center
+            Clock { s: pos }
+            Spacer { weight: 1 }
+            Clock { s: dur }
+          }
+        }
+      }
+      Row {
+        align: center
+        gap: 24
+        Spacer { weight: 1 }
+        Control { kind: "previous"; px: 48 }
+        Control { kind: "toggle"; px: 72 }
+        Control { kind: "next"; px: 48 }
+        Spacer { weight: 1 }
+      }
+      if has {
+        Text { text: "Playing in"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Item { label: "App"; value: m.app ?? "" }
+          if m.album != null {
+            Spacer { height: 1; fill: width; background: border }
+            Item { label: "Album"; value: m.album }
+          }
+        }
+        Row {
+          gap: 8
+          Spacer { weight: 1 }
+          Text { text: "Open ${m.app ?? "the app"}"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: media("open") }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "now playing"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if !allowed {
+        Column {
+          gap: 0
+          Text { text: "No access"; fontSize: 48; bold: true; maxLines: 1 }
+          Text { text: "Allow notification access so the launcher can see what's playing and control it."; fontSize: 16; color: muted }
+        }
+        Row {
+          gap: 8
+          Spacer { weight: 1 }
+          Text { text: "Allow access"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: media("open") }
+        }
+      } else if wide {
+        Row {
+          gap: 24
+          align: top
+          Art { src: has ? m.art : null; d: cover }
+          Player { weight: 1 }
+        }
+      } else {
+        Box { fill: width; align: center; Art { src: has ? m.art : null; d: cover } }
+        Player { }
       }
     }
   }

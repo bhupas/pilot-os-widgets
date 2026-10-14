@@ -1,5 +1,5 @@
 widget "dice" {
-  meta { owl: 6; description: "A set of dice from d2 to d100: pick one and tap it to roll. The d100 rolls a tens die and a units die, and the last rolls stay on the tile"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "A set of dice from d2 to d100: pick one and tap it to roll. The d100 rolls a tens die and a units die, and the last rolls stay on the tile"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 3x3
   minSize: 3x3
 
@@ -19,31 +19,27 @@ widget "dice" {
   let kinds = [2, 4, 6, 8, 10, 12, 20, 100]
   let pair = sides == 100
 
-  component Chip(n) {
+  component Chip(n, big = false) {
     Text {
       text: "d${n}"
-      fontSize: 12
+      fontSize: big ? 15 : 12
       bold: sides == n
       align: center
       maxLines: 1
-      padding: [0, 5]
-      radius: 3 * corners
-      background: sides == n ? accent : surface
+      padding: big ? [0, 12] : [0, 5]
+      radius: big ? 20 : 3 * corners
+      background: sides == n ? accent : big ? mix(surface, accent, 0.22) : surface
       color: sides == n ? background : foreground
       onTap: { log = sides == n ? log : []; total = sides == n ? total : 0; sides = n }
     }
   }
 
-  Column {
-    gap: 6
-    Row {
-      Text { text: "d${sides}"; style: muted; width: 44; maxLines: 1 }
-      Text { text: join(log, " · "); style: small; color: muted; weight: 1; align: end; maxLines: 1 }
-    }
+  onTap: screen()
 
+  // The die, or two for a d100: tap to roll. The same in the tile and the screen.
+  component Die() {
     Canvas {
-      weight: 1
-      fill: width
+      fill: true
       onTap: {
         log = total > 0 ? take([total] + log, 6) : log
         seed = ((seed + floor(time * 1000) + now) % 2147483646 + 1) * 48271 % 2147483647
@@ -150,11 +146,69 @@ widget "dice" {
         text("= ${total}", width / 2, height - 7, size: 13, bold: true, align: center, color: foreground)
       }
     }
+  }
+
+  Column {
+    gap: 6
+    fill: true
+    Row {
+      align: center
+      Text { text: "D${sides}"; style: label; color: muted; maxLines: 1; width: 44 }
+      Text { text: join(log, " · "); style: small; color: muted; weight: 1; align: end; maxLines: 1 }
+    }
+
+    Die { weight: 1; fill: width }
 
     Grid {
       columns: 4
       gap: 4
       for n in kinds key n { Chip { n: n } }
+    }
+  }
+
+  screen {
+    title: "dice"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: total == 0 ? "d${sides}" : "${total}"; fontSize: 48; bold: true; color: total > 0 && total == sides ? green : total == 1 && sides > 2 ? red : foreground; maxLines: 1 }
+        Text {
+          text: total == 0 ? "Tap the die to roll" : total == sides ? "The best roll on a d${sides}" : total == 1 && sides > 2 ? "The worst roll on a d${sides}" : "On a d${sides} · tap the die to roll again"
+          fontSize: 16; color: muted; maxLines: 1
+        }
+      }
+      Column {
+        background: surface
+        radius: 28
+        clip: true
+        padding: 20
+        Die { height: 260; fill: width }
+      }
+      Text { text: "Dice"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Grid {
+        columns: 4
+        gap: 8
+        for n in kinds key n { Chip { n: n; big: true } }
+      }
+      if len(log) > 0 {
+        Text { text: "Earlier rolls"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Text { text: join(log, "   "); fontSize: 18; maxLines: 1; weight: 1 }
+            Text { text: "newest first"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+      }
     }
   }
 }

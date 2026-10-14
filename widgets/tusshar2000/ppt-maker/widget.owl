@@ -1,7 +1,7 @@
 widget "ppt maker" {
   size: 6x4
   minSize: 3x3
-  meta { owl: 6; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.5"; license: "MIT"; category: "productivity" }
+  meta { owl: 9; description: "Type a topic and Claude Code makes a PowerPoint deck with real photos and diagrams: quick ones in a minute, or designed and checked ones. Edit or delete decks from the full screen"; version: "1.6"; license: "MIT"; category: "productivity" }
 
   requires { pacman: ["jq", "curl", "python", "python-lxml", "python-pillow"] }
 
@@ -47,6 +47,9 @@ widget "ppt maker" {
   state editing = ""       // the deck the field is changing, on the full screen
   state confirmDel = ""    // the deck whose delete was tapped once
   state gone = []          // decks deleted here, hidden before the list is read again
+  state adding = false     // the new deck sheet is open
+  state topic = ""         // its topic, as typed
+  state change = ""        // what to change in the deck being edited, as typed
 
   let version = "5"
   let ready = env.v == version
@@ -83,7 +86,26 @@ widget "ppt maker" {
 
   onTap: screen()
 
-  component DeckRow(f, actions = false) {
+  // Where things stand, in one word, and what the tile and the app lead with for it.
+  let phase = installing ? "installing" : env.claude == false ? "claude" : !ready ? "setup" : busy ? "busy" : !quick && !proReady ? "pro" : st.state == "done" ? "done" : st.state == "failed" ? "failed" : stopped ? "stopped" : "idle"
+  let setupFailed = setup.state == "failed" || setupStopped
+  let failNote = setupStopped ? "✗ Setup was interrupted: try again" : "✗ ${setup.step}"
+  let lead = phase == "installing" ? fmtDuration(now - setup.t) : phase == "claude" ? "Set up" : phase == "setup" ? (env == null ? "…" : env.v == "" ? "Set up" : "Update") : phase == "busy" ? (starting ? "Starting" : fmtDuration(now - st.t)) : "${len(list)} deck${len(list) == 1 ? "" : "s"}"
+  let note = phase == "installing" ? setup.step
+    : phase == "claude" ? "ppt maker uses Claude Code to write the slides. Install it and log in first."
+    : phase == "setup" ? (setupFailed ? failNote : env == null ? "…" : env.v == "" ? "One-time setup: the ppt command and python-pptx (a few MB)." : "An update to the ppt command is ready.")
+    : phase == "busy" ? (starting ? "Starting…" : trim(step ?? "") == "" ? "Working" : trim(step))
+    : phase == "pro" ? (setupFailed ? failNote : "Pro decks need pptxgenjs and LibreOffice (about 600 MB) so Claude can design and check every slide.")
+    : phase == "done" ? "✓ ${doneTitle} · ${st.slides} slides"
+    : phase == "failed" ? "✗ ${st.error}"
+    : phase == "stopped" ? "✗ Stopped before it finished (Linux or the app was closed): send it again"
+    : next != "" ? "Up next: ${next}" : "Type a topic and Claude makes the deck."
+  let noteColor = phase == "installing" || phase == "busy" ? accent : phase == "done" ? green : phase == "failed" || phase == "stopped" || ((phase == "setup" || phase == "pro") && setupFailed) ? red : muted
+  let canMake = ready && (quick || proReady)
+  let wide = (screenWidth ?? 0) > 600
+
+  // A deck on the tile: a tap downloads it.
+  component DeckRow(f) {
     let named = len(f) > 15 && sub(f, len(f) - 15, len(f) - 14) == "-" && sub(f, len(f) - 10, len(f) - 9) == "-"
     Row {
       gap: 8
@@ -91,85 +113,69 @@ widget "ppt maker" {
       Text { text: "▸"; color: accent; width: 12; onTap: url("${base}${f}") }
       Text { text: named ? replace(sub(f, 0, len(f) - 15), "-", " ") : replace(f, ".pptx", ""); style: small; maxLines: 1; weight: 1; onTap: url("${base}${f}") }
       Text { text: named ? "${sub(f, len(f) - 12, len(f) - 10)}/${sub(f, len(f) - 14, len(f) - 12)}" : ""; style: small; color: muted; width: 40; align: end; onTap: url("${base}${f}") }
-      if actions {
-        Text { text: "edit"; style: small; color: editing == f ? accent : foreground; width: 40; align: center; padding: [0, 6]; onTap: { editing = editing == f ? "" : f; confirmDel = "" } }
-        // The first tap only asks; the second hides the row at once and deletes the file.
-        if confirmDel == f {
-          Text { text: "sure?"; style: small; color: red; width: 56; align: center; padding: [0, 6]; onTap: { gone = gone + [f]; confirmDel = ""; run("rm -f -- ~/Decks/${sh(f)}") } }
-        } else {
-          Text { text: "delete"; style: small; color: muted; width: 56; align: center; padding: [0, 6]; onTap: { confirmDel = f; editing = "" } }
-        }
-      }
     }
   }
 
-  component Status() {
-    if starting {
-      Row {
-        align: center
-        Canvas { width: 16; height: 16; arc(8, 8, 6, (now ?? 0) * 90 % 360, 100, stroke: accent, width: 2, cap: round) }
-        Text { text: "starting…"; style: small; color: accent; weight: 1 }
-      }
-    } else if working {
+  // A deck in the app: a tap downloads it, ⋮ opens it to change or delete.
+  component DeckItem(f) {
+    let named = len(f) > 15 && sub(f, len(f) - 15, len(f) - 14) == "-" && sub(f, len(f) - 10, len(f) - 9) == "-"
+    Row {
+      gap: 4
+      align: center
+      padding: [20, 4, 4, 4]
       Column {
-        gap: 4
-        Text { text: st.topic; style: body; maxLines: 2 }
-        Row {
-          align: center
-          Canvas { width: 16; height: 16; arc(8, 8, 6, (now ?? 0) * 90 % 360, 100, stroke: accent, width: 2, cap: round) }
-          Text { text: trim(step ?? "") == "" ? "working" : trim(step); style: small; color: accent; weight: 1; maxLines: 1 }
-          Text { text: fmtDuration(now - st.t); style: small; color: muted; width: 56; align: end }
-        }
+        gap: 0
+        weight: 1
+        padding: [0, 10]
+        onTap: url("${base}${f}")
+        Text { text: named ? replace(sub(f, 0, len(f) - 15), "-", " ") : replace(f, ".pptx", ""); fontSize: 16; maxLines: 1 }
+        Text { text: named ? "${sub(f, len(f) - 12, len(f) - 10)}/${sub(f, len(f) - 14, len(f) - 12)} · ${sub(f, len(f) - 9, len(f) - 7)}:${sub(f, len(f) - 7, len(f) - 5)}" : "Added by hand"; fontSize: 14; color: muted; maxLines: 1 }
       }
-    } else if st.state == "done" {
-      Row {
-        align: center
-        Text { text: "✓ ${doneTitle} · ${st.slides} slides"; style: small; color: green; weight: 1; maxLines: 1 }
-        Button { text: "open"; onTap: url("${base}${st.file}") }
-      }
-    } else if st.state == "failed" {
-      Text { text: "✗ ${st.error}"; style: small; color: red; maxLines: 2 }
-    } else if stopped {
-      Text { text: "✗ stopped before it finished (Linux or the app was closed): send it again"; style: small; color: red; maxLines: 2 }
+      Text { text: "⋮"; fontSize: 20; color: muted; align: center; width: 48; padding: [0, 12]; onTap: { editing = f; change = ""; confirmDel = "" } }
     }
   }
 
+  // The tile: the decks or the deck being made, big, then the newest decks as rows allow.
   Column {
-    gap: 8
+    gap: 2
     fill: true
     Row {
       align: center
-      Text { text: "ppt maker"; style: label; weight: 1 }
-      if ready {
-        Text {
-          text: quick ? "quick" : "pro"
-          style: small
-          width: 64
+      Text { text: "PPT MAKER"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: quick ? "QUICK" : "PRO"; style: label; color: quick ? muted : accent; width: 48; align: end; maxLines: 1; visible: ready }
+    }
+    Text { text: lead; fontSize: (cols ?? 6) >= 4 ? 40 : 32; maxLines: 1 }
+    Text { text: note; style: small; color: noteColor; maxLines: 1 }
+    Text { text: phase == "busy" ? st.topic : ""; style: small; color: muted; maxLines: 1; visible: phase == "busy" }
+    Spacer { weight: 1 }
+    for f in list.take(max((rows ?? 4) * 2 - 5, 0)) key f {
+      DeckRow { f: f }
+    }
+  }
+
+  // The state of things, big, and what to do next.
+  component Lead() {
+    Column {
+      gap: 12
+      Column {
+        gap: 4
+        Text { text: lead; fontSize: 48; bold: true; maxLines: 1 }
+        Row {
+          gap: 8
           align: center
-          color: quick ? muted : accent
-          padding: [10, 3]
-          border: 1
-          borderColor: quick ? border : accent
-          radius: 10
-          onTap: quick = !quick
+          if phase == "installing" || phase == "busy" {
+            Canvas { width: 16; height: 16; arc(8, 8, 6, (now ?? 0) * 90 % 360, 100, stroke: accent, width: 2, cap: round) }
+          }
+          Text { text: note; fontSize: 16; color: noteColor; weight: 1; maxLines: 4 }
+        }
+        if phase == "busy" {
+          Text { text: st.topic; fontSize: 16; color: muted; maxLines: 2 }
         }
       }
-    }
-
-    if installing {
-      Row {
-        align: center
-        Canvas { width: 16; height: 16; arc(8, 8, 6, (now ?? 0) * 90 % 360, 100, stroke: accent, width: 2, cap: round) }
-        Text { text: setup.step; style: small; color: accent; weight: 1; maxLines: 2 }
-        Text { text: fmtDuration(now - setup.t); style: small; color: muted; width: 56; align: end }
-      }
-    } else if env.claude == false {
-      Text { text: "ppt maker uses Claude Code to write the slides. Install it and log in first."; style: small; maxLines: 3 }
-      Button { text: "set up Claude Code"; onTap: launcher("agents") }
-    } else if !ready {
-      Text { text: env == null ? "…" : env.v == "" ? "One-time setup: the ppt command and python-pptx (a few MB)." : "An update to the ppt command is ready."; style: small; maxLines: 3 }
-      if setup.state == "failed" || setupStopped { Text { text: setupStopped ? "✗ setup was interrupted: tap to try again" : "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
-      Button { text: env.v == "" ? "set up" : "update"; onTap: run("""
+      if phase == "claude" {
+        Text { text: "Set up Claude Code"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: launcher("agents") }
+      } else if phase == "setup" && env != null {
+        Text { text: env.v == "" ? "Set up" : "Update"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: run("""
 mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
 say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
 fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
@@ -904,11 +910,10 @@ venv/bin/pip install -q python-pptx || fail "couldn't install python-pptx"
 echo 5 > VERSION
 say done "ready"
 """) }
-    } else if !quick && !proReady {
-      Text { text: "Pro decks need pptxgenjs and LibreOffice (about 600 MB) so Claude can design and check every slide."; style: small; maxLines: 3 }
-      if setup.state == "failed" || setupStopped { Text { text: setupStopped ? "✗ setup was interrupted: tap to try again" : "✗ ${setup.step}"; style: small; color: red; maxLines: 3 } }
-      Row {
-        Button { text: "install pro"; onTap: run("""
+      } else if phase == "pro" {
+        Row {
+          gap: 8
+          Text { text: "Install pro"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: run("""
 mkdir -p ~/.cache/ppt ~/.local/share/pptmaker
 say() { printf '{"state":"%s","step":"%s","t":%s}' "$1" "$2" "$(date +%s)" > ~/.cache/ppt/setup.json; }
 fail() { say failed "$1 (see ~/.cache/ppt/setup.log)"; exit 1; }
@@ -925,108 +930,185 @@ say installing "installing markitdown"
 venv/bin/pip install -q "markitdown[pptx]" || fail "couldn't install markitdown"
 say done "pro ready"
 """) }
-        Button { text: "use quick"; color: muted; onTap: quick = true }
+          Text { text: "Use quick"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: quick = true }
+        }
+      } else if canMake {
+        Row {
+          gap: 8
+          Text { text: busy ? "+ Queue a deck" : "+ New deck"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { topic = ""; adding = true } }
+          if phase == "done" {
+            Text { text: "Open"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: url("${base}${st.file}") }
+          }
+        }
       }
-    } else {
-      // Typing happens on the full screen, where the keyboard can't cover the field.
-      Row {
-        align: center
-        padding: [10, 8]
-        border: 1
-        borderColor: border
-        radius: 8
-        onTap: screen()
-        Text { text: next != "" ? "up next: ${next}" : busy ? "＋ queue another topic" : quick ? "topic (quick, ~1 min)" : "topic, e.g. How vaccines work, 12 slides"; style: small; color: next != "" ? foreground : muted; maxLines: 1; weight: 1 }
+      // A topic sent while a deck is being made waits here, and starts when it's done.
+      if next != "" && busy {
+        Row {
+          gap: 12
+          align: center
+          padding: [20, 12, 12, 12]
+          background: surface
+          radius: 28
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Up next"; fontSize: 14; color: muted; maxLines: 1 }
+            Text { text: nextEdit != "" ? "Change ${nextEditTitle}: ${next}" : "${next} (${nextQuick ? 'quick' : 'pro'})"; fontSize: 16; maxLines: 2 }
+          }
+          Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { next = ""; nextEdit = ""; nextCtx = "" } }
+        }
       }
-      Status {}
-    }
-
-    Column {
-      gap: 6
-      weight: 1
-      scroll: true
-      if ready && len(list) == 0 {
-        Text { text: "no decks yet"; style: small; color: muted }
-      }
-      for f in list.take(rows >= 4 ? 4 : 2) key f {
-        DeckRow { f: f }
+      if ready {
+        Text { text: "Mode"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 12
+          padding: [16, 16]
+          background: surface
+          radius: 28
+          Row {
+            gap: 6
+            for m in [[true, "Quick"], [false, "Pro"]] {
+              Text { text: m[1]; fontSize: 16; weight: 1; align: center; maxLines: 1; color: foreground; background: quick == m[0] ? mix(surface, accent, 0.22) : background; radius: 20; padding: [0, 10]; onTap: quick = m[0] }
+            }
+          }
+          Text { text: quick ? "Plain slides with pictures, in about a minute." : "Designed and checked by Claude, in 5 to 10 minutes."; fontSize: 14; color: muted; padding: [4, 0] }
+        }
       }
     }
   }
 
+  // Every deck in ~/Decks, newest first.
+  component Decks() {
+    Column {
+      gap: 12
+      Text { text: "Decks"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for f, i in list key f {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          DeckItem { f: f }
+        }
+        if len(list) == 0 {
+          Text { text: ready ? "No decks yet." : "Decks show here once it's set up."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+      Text { text: "Tap a deck to download it, or ⋮ to change or delete it."; fontSize: 14; color: muted; padding: [4, 8, 0, 0]; visible: len(list) > 0 }
+    }
+  }
+
+  // The app: what's happening, a new deck, the mode, and every deck.
   screen {
     title: "ppt maker"
     Column {
       gap: 12
-      padding: 16
       scroll: true
-      if ready && (quick || proReady) {
+      padding: [0, 4, 0, 24]
+      if wide {
         Row {
-          align: center
-          gap: 8
-          Text { text: quick ? "quick: plain slides with pictures, about a minute" : "pro: designed and checked by Claude, 5-10 min"; style: small; color: muted; weight: 1; maxLines: 2 }
-          Text {
-            text: quick ? "quick" : "pro"
-            style: small
-            width: 64
-            align: center
-            color: quick ? muted : accent
-            padding: [10, 3]
-            border: 1
-            borderColor: quick ? border : accent
-            radius: 10
-            onTap: quick = !quick
-          }
+          gap: 24
+          Lead { weight: 1 }
+          Decks { weight: 1 }
         }
-        if editing != "" {
-          Row {
-            align: center
-            gap: 8
-            Text { text: "editing: ${editingTitle}"; style: small; color: accent; weight: 1; maxLines: 1 }
-            Button { text: "✕"; color: muted; onTap: editing = "" }
-          }
-          Input {
-            placeholder: "what to change, e.g. make slide 3 simpler"
-            clear: true
-            onSubmit: { next = trim(value); nextEdit = editing; nextQuick = false; nextCtx = ""; editing = "" }
-          }
-        } else {
-          Input {
-            placeholder: busy ? "next topic: starts when this deck is done" : quick ? "topic (quick, ~1 min)" : "topic, e.g. How vaccines work, 12 slides"
-            clear: true
-            onSubmit: { next = trim(value); nextQuick = quick; nextCtx = ctx; nextEdit = ""; ctx = "" }
-          }
-          if ctx != "" {
-            Row {
-              align: center
-              gap: 8
-              Text { text: "context: ${ctx}"; style: small; color: muted; weight: 1; maxLines: 2 }
-              Button { text: "✕"; color: muted; onTap: ctx = "" }
-            }
-          } else {
-            Input {
-              placeholder: "optional: notes or a link to use"
-              fontSize: 13
-              clear: true
-              onSubmit: ctx = trim(value)
-            }
-          }
-        }
-        if next != "" && busy {
-          Row {
-            align: center
-            gap: 8
-            Text { text: nextEdit != "" ? "up next: change ${nextEditTitle}: ${next}" : "up next (${nextQuick ? 'quick' : 'pro'}): ${next}"; style: small; weight: 1; maxLines: 2 }
-            Button { text: "✕"; color: muted; onTap: { next = ""; nextEdit = ""; nextCtx = "" } }
-          }
-        }
-        Status {}
       } else {
-        Text { text: "Finish setting up on the tile first."; style: small; color: muted }
+        Lead { }
+        Decks { }
       }
-      Text { text: "${len(list)} decks · tap a name to download it · edit: type what to change and send · delete asks once more"; style: small; color: muted; maxLines: 3 }
-      for f in list key f {
-        DeckRow { f: f; actions: true }
+
+      // A new deck: the topic, and notes, pasted text or a link to build it from.
+      if adding {
+        Sheet {
+          title: busy ? "Next deck" : "New deck"
+          onDismiss: adding = false
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input { text: topic; placeholder: "Topic, e.g. How vaccines work, 12 slides"; focus: adding; onChange: topic = value }
+            Input { text: ctx; placeholder: "Notes or a link to use (optional)"; onChange: ctx = value }
+            Text { text: (quick ? "Quick: plain slides with pictures, in about a minute." : "Pro: designed and checked by Claude, in 5 to 10 minutes.") + (busy ? " It starts when this deck is done." : ""); fontSize: 14; color: muted }
+            Row {
+              gap: 8
+              align: center
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: adding = false }
+              Text {
+                text: "Make"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  if trim(topic) != "" {
+                    next = trim(topic)
+                    nextQuick = quick
+                    nextCtx = trim(ctx)
+                    nextEdit = ""
+                    ctx = ""
+                  }
+                  adding = false
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // A deck: what to change in it, or delete it (asked once more).
+      if editing != "" {
+        Sheet {
+          title: editingTitle
+          onDismiss: { editing = ""; confirmDel = "" }
+          let f = editing
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: change
+              placeholder: "What to change, e.g. make slide 3 simpler"
+              focus: editing != ""
+              onChange: change = value
+              onSubmit: {
+                if trim(value) != "" {
+                  next = trim(value)
+                  nextEdit = editing
+                  nextQuick = false
+                  nextCtx = ""
+                  editing = ""
+                }
+              }
+            }
+            Text { text: "Claude changes it in place" + (busy ? ", once this deck is done." : "."); fontSize: 14; color: muted }
+            Row {
+              gap: 8
+              align: center
+              Text {
+                text: confirmDel == f ? "Sure?" : "Delete"; fontSize: 15; bold: confirmDel == f; color: red; padding: [8, 12]
+                onTap: {
+                  if confirmDel == f {
+                    gone = gone + [f]
+                    confirmDel = ""
+                    run("rm -f -- ~/Decks/${sh(f)}")
+                    editing = ""
+                  } else {
+                    confirmDel = f
+                  }
+                }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { editing = ""; confirmDel = "" } }
+              Text {
+                text: "Change"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  if trim(change) != "" {
+                    next = trim(change)
+                    nextEdit = editing
+                    nextQuick = false
+                    nextCtx = ""
+                    editing = ""
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

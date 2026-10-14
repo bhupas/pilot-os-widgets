@@ -1,5 +1,5 @@
 widget "analog clock" {
-  meta { description: "An analog clock drawn on a Canvas, ticking every second"; version: "1.1"; license: "MIT"; category: "time" }
+  meta { owl: 8; description: "An analog clock drawn on a Canvas, ticking every second"; version: "1.2"; license: "MIT"; category: "time" }
   size: 3x3
   minSize: 2x2
 
@@ -8,21 +8,86 @@ widget "analog clock" {
   let m = num(fmtTime(now, "m"))
   let s = num(fmtTime(now, "s"))
 
-  // Drawing happens in dp; 0 degrees is 12 o'clock and angles run clockwise.
-  Canvas {
-    let cx = width / 2
-    let cy = height / 2
-    let r = min(width, height) / 2 - 4
+  onTap: screen()
 
-    circle(cx, cy, r, stroke: border, width: 2)
-    for i in range(12) {
-      rotate(i * 30, cx, cy) {
-        line(cx, cy - r + 4, cx, cy - r + (i % 3 == 0 ? 14 : 9), stroke: i % 3 == 0 ? foreground : muted, width: 2, cap: round)
+  // Drawing happens in dp; 0 degrees is 12 o'clock and angles run clockwise.
+  component Dial() {
+    Canvas {
+      let cx = width / 2
+      let cy = height / 2
+      let r = min(width, height) / 2 - 4
+
+      circle(cx, cy, r, stroke: border, width: 2)
+      for i in range(12) {
+        rotate(i * 30, cx, cy) {
+          line(cx, cy - r + 4, cx, cy - r + (i % 3 == 0 ? 14 : 9), stroke: i % 3 == 0 ? foreground : muted, width: 2, cap: round)
+        }
+      }
+      rotate((h % 12 + m / 60) * 30, cx, cy) { line(cx, cy, cx, cy - r * 0.5, stroke: foreground, width: 5, cap: round) }
+      rotate((m + s / 60) * 6, cx, cy) { line(cx, cy, cx, cy - r * 0.75, stroke: foreground, width: 3, cap: round) }
+      rotate(s * 6, cx, cy) { line(cx, cy + r * 0.15, cx, cy - r * 0.85, stroke: red, width: 1.5, cap: round) }
+      circle(cx, cy, 4, fill: accent)
+    }
+  }
+
+  Dial { }
+
+  // The time in words and figures, the dial big, and where the day and year stand.
+  let wide = (screenWidth ?? 0) > 600
+  let dial = clamp((wide ? (screenWidth ?? 360) / 2 : (screenWidth ?? 360)) - 48, 200, 420)
+
+  component Item(label, value) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
+    }
+  }
+
+  component Details() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: fmtTime(now, "HH:mm:ss"); fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: fmtTime(now, "EEEE d MMMM yyyy"); fontSize: 16; color: muted; maxLines: 1 }
+      }
+      Text { text: "Today"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Item { label: "Week"; value: fmtTime(now, "w") }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Day of the year"; value: fmtTime(now, "D") }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Time zone"; value: fmtTime(now, "zzzz") }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "UTC offset"; value: fmtTime(now, "XXX") }
       }
     }
-    rotate((h % 12 + m / 60) * 30, cx, cy) { line(cx, cy, cx, cy - r * 0.5, stroke: foreground, width: 5, cap: round) }
-    rotate((m + s / 60) * 6, cx, cy) { line(cx, cy, cx, cy - r * 0.75, stroke: foreground, width: 3, cap: round) }
-    rotate(s * 6, cx, cy) { line(cx, cy + r * 0.15, cx, cy - r * 0.85, stroke: red, width: 1.5, cap: round) }
-    circle(cx, cy, 4, fill: accent)
+  }
+
+  screen {
+    title: "analog clock"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Box { size: dial; Dial { } }
+          Details { weight: 1 }
+        }
+      } else {
+        Details { }
+        Box { fill: width; align: center; padding: [0, 12]; Box { size: dial; Dial { } } }
+      }
+    }
   }
 }

@@ -2,12 +2,13 @@ widget "departures" {
   size: 3x2
   minSize: 2x1
   requires { pacman: [] }
-  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.0"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Live departures from a stop you pick, anywhere Transitous has open timetables: line, direction, platform and minutes to go, with delays. Tap the tile for the full board or to change the stop"; version: "1.1"; license: "MIT"; category: "world"; owl: 9 }
 
   // The stop, picked in the full screen and kept across restarts. No location is hard-coded.
   state stopId = "" persist
   state stopName = "" persist
   state query = ""
+  state picking = false          // the stop search is open
 
   source now = clock every 15s
   // Transitous (https://transitous.org) asks clients to name themselves.
@@ -48,8 +49,9 @@ widget "departures" {
   // a departure is (at - nowMin) mod 1440 minutes away, and one that wraps to ~1439 has just left.
   let nowMin = floor(now % 86400 / 60)
   let upcoming = rows.filter(r => (r.at - nowMin + 1440) % 1440 < 1380)
-  // The next departure large (~40dp under the ~16dp stop name), then as many smaller ones (~26dp) as fit.
-  let shown = upcoming.take(tileHeight == null ? 2 : clamp(1 + floor((tileHeight - 70) / 26), 1, 15))
+  // The next departure large (~50dp under the ~16dp stop name, ~34dp on one row), then as many smaller ones (~24dp) as fit.
+  let tall = tileHeight == null || tileHeight >= 100
+  let shown = upcoming.take(tileHeight == null ? 2 : clamp(1 + floor((tileHeight - (tall ? 92 : 64)) / 24), 1, 15))
   let showName = tileHeight == null || tileHeight >= 64
   let narrow = cols != null && cols <= 2
 
@@ -60,10 +62,11 @@ widget "departures" {
       text: r.line
       style: label
       bold: true
+      // The line's own colours, as the operator publishes them.
       color: r.text != "" ? "#${r.text}" : foreground
-      background: r.color != "" ? "#${r.color}" : alpha(accent, 0.25)
-      padding: [4, 1]
-      radius: 4
+      background: r.color != "" ? "#${r.color}" : mix(surface, accent, 0.22)
+      padding: [4, 2]
+      radius: 6
       width: w
       align: center
       maxLines: 1
@@ -81,43 +84,50 @@ widget "departures" {
       let tint = r.cancelled ? red : !r.live ? foreground : delay >= 5 ? red : delay >= 2 ? yellow : foreground
       let big = r.cancelled ? "×" : left == 0 ? "now" : left < 60 ? "${left}" : fmtTime(at, "HH:mm")
       let unit = r.cancelled || left == 0 || left >= 60 ? "" : "min"
-      if mode == "list" {
+      let when = fmtTime(at, "HH:mm") + (r.track != null ? " · platform ${r.track}" : "") + (r.live && delay >= 2 ? " · ${delay} min late" : "")
+      if mode == "lead" {
+        // The screen's lead: the next one, as big as it gets.
+        Text { text: r.cancelled ? "Cancelled" : unit == "" ? big : "${big} min"; fontSize: 48; bold: true; color: tint; maxLines: 1 }
+        Text { text: "${r.line} to ${r.to} · ${when}"; fontSize: 16; color: muted; maxLines: 2 }
+      } else if mode == "list" {
         Row {
           align: center
-          gap: 8
+          gap: 12
+          padding: [20, 14]
           Badge { r: r; w: 54 }
-          Text { text: r.to; style: small; color: r.cancelled ? muted : foreground; maxLines: 1; weight: 1 }
-          if r.track != null {
-            Text { text: "${r.track}"; style: label; color: r.moved ? orange : muted; maxLines: 1; width: 28; align: end }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: r.to; fontSize: 16; color: r.cancelled ? muted : foreground; maxLines: 1 }
+            Text { text: r.cancelled ? "Cancelled · ${when}" : when; fontSize: 14; color: r.moved ? orange : muted; maxLines: 1 }
           }
-          Text { text: fmtTime(at, "HH:mm"); style: label; color: muted; font: mono; width: 40; align: end }
-          Text { text: big == "now" || unit == "" ? big : "${big}′"; style: body; bold: true; font: mono; color: tint; width: 52; align: end; maxLines: 1 }
+          Text { text: unit == "" ? big : "${big} min"; fontSize: 16; bold: true; color: tint; width: 64; align: end; maxLines: 1 }
         }
       } else {
         // "14 min  M36  U Haselhorst": the minutes first and largest, then the line, then where it goes.
         let lead = mode == "big"
-        // A two-column tile is ~110dp inside: everything a quarter smaller, and the line gives way last.
-        let k = narrow ? 0.75 : 1
+        // One row: smaller. A two-column tile is ~110dp inside: everything a quarter smaller, and the line gives way last.
+        let k = (narrow ? 0.75 : 1) * (lead && tileHeight != null && tileHeight < 100 ? 0.7 : 1)
         Row {
           align: bottom
           gap: narrow ? 3 : 6
-          // A Text without a width fills the row, so each gets its own: monospace is ~0.6em a character.
-          Text { text: big; fontSize: (lead ? 30 : 18) * k; bold: true; font: mono; color: tint; maxLines: 1; width: len(big) * (lead ? 30 : 18) * k * 0.62 + 2 }
+          // A Text without a width fills the row, so each gets its own: a digit is under ~0.6em.
+          Text { text: big; fontSize: (lead ? 40 : 18) * k; bold: true; color: tint; maxLines: 1; width: len(big) * (lead ? 40 : 18) * k * 0.62 + 2 }
           if unit != "" {
-            Text { text: unit; fontSize: (lead ? 14 : 12) * k; color: lead ? foreground : muted; padding: [0, 0, 0, (lead ? 5 : 2) * k]; width: 3 * (lead ? 14 : 12) * k * 0.62 + 2 }
+            Text { text: unit; fontSize: (lead ? 14 : 12) * k; color: lead ? foreground : muted; padding: [0, 0, 0, (lead ? 7 : 2) * k]; width: 3 * (lead ? 14 : 12) * k * 0.62 + 4 }
           }
           Text {
             text: r.line
             fontSize: (lead ? 20 : 14) * k
             bold: true
             color: lead ? foreground : muted
-            padding: [narrow ? 2 : 4, 0, 0, (lead ? 3 : 1) * k]
+            padding: [narrow ? 2 : 4, 0, 0, (lead ? 5 : 1) * k]
             maxLines: 1
             width: narrow ? null : len(r.line) * (lead ? 20 : 14) * 0.62 + 6
             weight: narrow ? 1 : null
           }
           if !narrow {
-            Text { text: r.to; style: label; color: muted; maxLines: 1; weight: 1; padding: [0, 0, 0, lead ? 6 : 3] }
+            Text { text: r.to; style: small; color: muted; maxLines: 1; weight: 1; padding: [0, 0, 0, lead ? 7 : 2] }
           }
         }
       }
@@ -126,26 +136,22 @@ widget "departures" {
 
   Column {
     gap: 2
-    justify: center
+    fill: true
     if showName {
-      Text { text: stopName == "" ? "departures" : stopName; style: label; color: muted; maxLines: 1 }
+      Text { text: stopName == "" ? "DEPARTURES" : upper(stopName); style: label; color: muted; maxLines: 1 }
     }
     if stopId == "" {
-      Text { text: "Tap to pick a stop."; style: small; color: muted }
+      Text { text: "No stop"; fontSize: tall ? 28 : 20; bold: true; maxLines: 1 }
+      Text { text: "Tap to pick one"; style: small; color: muted; maxLines: 1 }
+    } else if board == null {
+      Text { text: "…"; fontSize: 30; bold: true; color: muted }
+    } else if problem != null {
+      Text { text: problem; style: small; color: muted; maxLines: 2 }
+    } else if len(upcoming) == 0 {
+      Text { text: "No departures soon"; style: small; color: muted; maxLines: 2 }
     } else {
-      if board == null {
-        Text { text: "…"; fontSize: 30; bold: true; font: mono; color: muted }
-      } else {
-        if problem != null {
-          Text { text: problem; style: small; color: muted }
-        } else {
-          if len(upcoming) == 0 {
-            Text { text: "no departures soon"; style: small; color: muted }
-          }
-          for r, i in shown key r.key {
-            Departure { r: r; now: now; nowMin: nowMin; mode: i == 0 ? "big" : "small" }
-          }
-        }
+      for r, i in shown key r.key {
+        Departure { r: r; now: now; nowMin: nowMin; mode: i == 0 ? "big" : "small" }
       }
     }
   }
@@ -154,42 +160,107 @@ widget "departures" {
     title: stopName == "" ? "departures" : stopName
     Column {
       scroll: true
-      gap: 8
-      Input { placeholder: stopName == "" ? "search for a stop" : "change stop"; clear: true; onSubmit: { query = value; refresh() } }
-      if len(trim(query)) >= 2 {
-        if found == null {
-          Text { text: "searching…"; style: small; color: muted }
-        } else {
-          if len(stops) == 0 {
-            Text { text: found.ok ? "no stops called “${query}”" : "transitous offline"; style: small; color: muted }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if stopId == "" {
+        Column {
+          gap: 0
+          Text { text: "No stop yet"; fontSize: 48; bold: true; maxLines: 1 }
+          Text { text: "Pick a stop to see its next departures, anywhere Transitous has open timetables."; fontSize: 16; color: muted; maxLines: 3 }
+        }
+        Text { text: "Pick a stop"; fontSize: 16; bold: true; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: picking = true }
+      } else {
+        if board == null {
+          Text { text: "…"; fontSize: 48; bold: true; color: muted }
+        } else if problem != null {
+          Column {
+            gap: 0
+            Text { text: "Offline"; fontSize: 48; bold: true; maxLines: 1 }
+            Text { text: problem == "too many requests" ? "Too many requests, trying again soon" : "Transitous can't be reached"; fontSize: 16; color: muted; maxLines: 2 }
           }
-          for s in stops key s.id {
-            Column {
-              gap: 0
-              padding: [0, 6]
-              onTap: { stopId = s.id; stopName = s.name; query = ""; refresh() }
-              Text { text: s.name; style: body; maxLines: 1 }
-              Text { text: [s.area, s.modes].filter(x => x != "").join(" · "); style: small; color: muted; maxLines: 1 }
+        } else if len(upcoming) == 0 {
+          Column {
+            gap: 0
+            Text { text: "Nothing soon"; fontSize: 48; bold: true; maxLines: 1 }
+            Text { text: "No departures from here in the next hours"; fontSize: 16; color: muted; maxLines: 2 }
+          }
+        } else {
+          Departure { r: upcoming[0]; now: now; nowMin: nowMin; mode: "lead" }
+        }
+        if len(upcoming) > 1 {
+          Text { text: "Next departures"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+          Column {
+            gap: 0
+            background: surface
+            radius: 28
+            clip: true
+            for r, i in upcoming.drop(1) key r.key {
+              Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+              Departure { r: r; now: now; nowMin: nowMin; mode: "list" }
             }
           }
-          Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+        }
+        Text { text: "Stop"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: picking = true
+            Text { text: stopName; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: "Change"; fontSize: 16; color: accent; maxLines: 1 }
+            Text { text: "›"; fontSize: 18; color: muted }
+          }
+          Spacer { height: 1; fill: width; background: border }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: refresh()
+            Text { text: "Refresh"; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: "Every 30 s"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+        Text { text: "Data: Transitous, from open timetables. Delays show where the operator publishes live times."; fontSize: 13; color: muted; padding: [4, 8, 0, 0] }
+      }
+
+      // Finding a stop: type its name and send; tap one to pick it.
+      if picking {
+        Sheet {
+          title: "Pick a stop"
+          onDismiss: { picking = false; query = "" }
+          Column {
+            gap: 12
+            padding: [0, 4, 0, 4]
+            Input { placeholder: "Search for a stop"; focus: picking; onSubmit: { query = value; refresh() } }
+            if len(trim(query)) >= 2 {
+              if found == null {
+                Text { text: "Searching…"; fontSize: 14; color: muted }
+              } else if len(stops) == 0 {
+                Text { text: found.ok ? "No stops called “${query}”" : "Transitous is offline"; fontSize: 14; color: muted }
+              }
+              for s in stops key s.id {
+                Column {
+                  gap: 0
+                  padding: [0, 10]
+                  onTap: { stopId = s.id; stopName = s.name; query = ""; picking = false; refresh() }
+                  Text { text: s.name; fontSize: 16; maxLines: 1 }
+                  Text { text: [s.area, s.modes].filter(x => x != "").join(" · "); fontSize: 14; color: muted; maxLines: 1 }
+                }
+              }
+            }
+            Row {
+              gap: 8
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { picking = false; query = "" } }
+            }
+          }
         }
       }
-      if stopId != "" {
-        Row {
-          align: center
-          Text { text: "next departures"; style: label; color: muted; weight: 1 }
-          Button { text: "refresh"; color: muted; onTap: refresh() }
-        }
-        if problem != null {
-          Text { text: problem; style: body; color: muted }
-        }
-        for r in upcoming key r.key {
-          Departure { r: r; now: now; nowMin: nowMin; mode: "list" }
-        }
-        Text { text: "data: Transitous, from open timetables. Delays show where the operator publishes live times"; style: label; color: muted }
-      }
-      Spacer { height: 12 }
     }
   }
 }

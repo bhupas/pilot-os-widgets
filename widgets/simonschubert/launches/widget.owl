@@ -1,5 +1,5 @@
 widget "launches" {
-  meta { description: "A live countdown to the next rocket launch and the ones after it, from The Space Devs"; version: "1.1"; license: "MIT"; category: "world" }
+  meta { owl: 8; description: "A live countdown to the next rocket launch and the ones after it, from The Space Devs"; version: "1.2"; license: "MIT"; category: "world" }
   size: 6x3
   minSize: 3x2
 
@@ -16,31 +16,152 @@ widget "launches" {
   let upcoming = launches.filter(l => l.at > now - 3600)
   let next = upcoming.first()
   let t = next.at - now
+  let d = floor(t / 86400)
+  let h = floor(t % 86400 / 3600)
+  let hms = "${pad(h, 2, "0")}:${pad(floor(t % 3600 / 60), 2, "0")}:${pad(floor(t % 60), 2, "0")}"
+  let tminus = next == null ? null : t <= 0 ? "Liftoff" : "T-${d > 0 ? "${d}d " : ""}${hms}"
+  // Narrow tiles: days and hours, or the clock on the last day.
+  let brief = next == null ? null : t <= 0 ? "Liftoff" : d > 0 ? "${d}d ${h}h" : hms
+  let short = (rows ?? 3) < 3
+  let full = (cols ?? 6) >= 5
+  let wide = (screenWidth ?? 0) > 600
 
-  onTap: url(next.url ?? "https://spacelaunchnow.me")
+  onTap: screen()
 
   Column {
-    gap: 4
+    gap: 2
+    fill: true
+    if !short {
+      Row {
+        align: center
+        Text { text: "LAUNCH"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: next.status ?? ""; style: label; color: next.status == "Go" ? green : muted; width: 48; align: end; maxLines: 1 }
+      }
+    }
+    Text { text: full ? tminus : brief; fontSize: full ? 36 : 32; font: mono; color: accent; maxLines: 1 }
+    Text { text: next.name; style: small; maxLines: 1 }
+    if !short {
+      Text { text: "${next.provider} · ${next.where}"; style: small; color: muted; maxLines: 1 }
+    }
+    Spacer { weight: 1 }
+    // Then the launches after it, as many as fit: three at 3 rows, three more per row after that.
+    for l in upcoming.drop(1).take(short ? 0 : max((rows ?? 3) * 3 - 6, 0)) key l.id {
+      Row {
+        gap: 8
+        align: center
+        Text { text: fmtTime(l.at, "EEE d MMM"); style: small; color: muted; width: 80; maxLines: 1 }
+        Text { text: l.name; style: small; weight: 1; maxLines: 1 }
+      }
+    }
+  }
+
+  component Item(label, value, tint = muted) {
     Row {
-      Text { text: "next launch"; style: muted; weight: 1 }
-      Text { text: next.status; fontSize: 11; color: next.status == "Go" ? green : muted; width: 48; align: end }
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: tint; align: end; weight: 1; maxLines: 1 }
     }
-    Text { text: next.name; style: body; bold: true; maxLines: 1 }
-    Text {
-      text: next == null ? "…" : t <= 0 ? "liftoff" : "T-${t >= 86400 ? "${floor(t / 86400)}d " : ""}${pad(floor(t % 86400 / 3600), 2, "0")}:${pad(floor(t % 3600 / 60), 2, "0")}:${pad(floor(t % 60), 2, "0")}"
-      style: title; font: mono; color: accent
+  }
+
+  // The countdown as Google's clock shows a timer: days, hours, minutes and seconds.
+  component Next() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        if next != null && t > 0 {
+          Row {
+            gap: 8
+            for u in [[d, "days"], [h, "hours"], [floor(t % 3600 / 60), "min"], [floor(t % 60), "sec"]] {
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: pad(u[0], 2, "0"); fontSize: 48; bold: true; font: mono; color: accent; maxLines: 1 }
+                Text { text: u[1]; fontSize: 14; color: muted; maxLines: 1 }
+              }
+            }
+          }
+        } else {
+          Text { text: next == null ? (launches == null ? "…" : "None") : "Liftoff"; fontSize: 48; bold: true; color: accent; maxLines: 1 }
+        }
+        Text { text: next == null ? "Loading the next launches…" : next.name; fontSize: 16; color: muted; maxLines: 2; padding: [0, 8, 0, 0] }
+      }
+      if next != null {
+        Text { text: "Next launch"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Item { label: "Lift-off"; value: fmtTime(next.at, "EEE d MMM, HH:mm") }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Status"; value: next.status; tint: next.status == "Go" ? green : muted }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Provider"; value: next.provider }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Site"; value: next.where }
+        }
+        Text { text: "Open on Space Launch Now"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url(next.url ?? "https://spacelaunchnow.me") }
+      }
     }
-    Text { text: "${next.provider} · ${next.where}"; style: small; color: muted; maxLines: 1 }
+  }
+
+  // Every launch after it; a tap opens it on Space Launch Now.
+  component Later() {
+    Column {
+      gap: 12
+      Text { text: "Coming up"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for l, i in upcoming.drop(1) key l.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: url(l.url)
+            Column {
+              gap: 0
+              width: 72
+              Text { text: fmtTime(l.at, "EEE d"); fontSize: 16; maxLines: 1 }
+              Text { text: fmtTime(l.at, "HH:mm"); fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: l.name; fontSize: 16; maxLines: 2 }
+              Text { text: "${l.provider} · ${l.where}"; fontSize: 14; color: muted; maxLines: 1 }
+            }
+          }
+        }
+        if len(upcoming ?? []) < 2 {
+          Text { text: launches == null ? "Loading…" : "Nothing else scheduled yet."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "launches"
     Column {
       scroll: true
-      weight: 1
-      gap: 2
-      for l in upcoming.drop(1) key l.id {
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
         Row {
-          onTap: url(l.url)
-          Text { text: fmtTime(l.at, "EEE d MMM"); fontSize: 11; color: muted; width: 80 }
-          Text { text: l.name; fontSize: 11; maxLines: 1; weight: 1 }
+          gap: 24
+          align: top
+          Next { weight: 1 }
+          Later { weight: 1 }
         }
+      } else {
+        Next { }
+        Later { }
       }
     }
   }

@@ -1,5 +1,5 @@
 widget "github trending" {
-  meta { description: "The most-starred GitHub repositories created in the last week; tap one to open it"; version: "1.1"; license: "MIT"; category: "dev" }
+  meta { owl: 8; description: "The most-starred GitHub repositories created in the last week; tap one to open it"; version: "1.2"; license: "MIT"; category: "dev" }
   size: 6x4
   minSize: 4x3
 
@@ -13,27 +13,105 @@ widget "github trending" {
     }]'
   """) every 1h json timeout 15s
 
-  onTap: url("https://github.com/trending")
+  let list = repos ?? []
+  let top = list[0]
+  let stars = list.map(r => r.stars >= 1000 ? "★ ${fixed(r.stars / 1000, 1)}k" : "★ ${r.stars}")
+  // A repo is about 34 dp in the tile: as many as fit under the first one.
+  let more = max(floor(((rows ?? 4) * 64 - 30 - 110) / 34), 0)
+  let wide = (screenWidth ?? 0) > 600
+  let half = ceil(len(list) / 2)
+
+  onTap: screen()
+
+  // A card of repos, each opening on GitHub.
+  component Repos(items, from = 0) {
+    Column {
+      gap: 0
+      background: surface
+      radius: 28
+      clip: true
+      for r, i in items key r.url {
+        Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: url(r.url)
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: r.name; fontSize: 16; maxLines: 1 }
+            if r.desc != "" { Text { text: r.desc; fontSize: 14; color: muted; maxLines: 2 } }
+            if r.lang != "" { Text { text: r.lang; fontSize: 13; color: accent; maxLines: 1 } }
+          }
+          Text { text: stars[from + i]; fontSize: 14; color: muted; maxLines: 1; width: 64; align: end }
+        }
+      }
+    }
+  }
 
   Column {
-    gap: 4
-    Text { text: "github trending · this week"; style: muted }
-    Column {
-      scroll: true
-      weight: 1
-      gap: 6
-      for r in repos key r.url {
+    gap: 2
+    fill: true
+    Row {
+      align: center
+      Text { text: "GITHUB"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: "THIS WEEK"; style: label; color: accent; maxLines: 1; width: 72; align: end }
+    }
+    if repos == null {
+      Text { text: "…"; fontSize: 24; bold: true; color: muted }
+    } else if top == null {
+      Text { text: "Nothing yet"; fontSize: 22; bold: true; maxLines: 1 }
+      Text { text: "GitHub didn't answer"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Column {
+        gap: 0
+        onTap: url(top.url)
+        Row {
+          align: center
+          Text { text: split(top.name, "/")[1]; fontSize: 24; bold: true; maxLines: 1; weight: 1 }
+          Text { text: stars[0]; fontSize: 16; color: accent; maxLines: 1; width: 72; align: end }
+        }
+        Text { text: top.desc != "" ? top.desc : top.name; style: small; color: muted; maxLines: 1 }
+      }
+      Spacer { height: 6 }
+      for r, i in list.drop(1).take(more) key r.url {
         Column {
           gap: 0
           onTap: url(r.url)
           Row {
-            Text { text: r.name; fontSize: 13; bold: true; maxLines: 1; weight: 1 }
-            Text { text: r.stars >= 1000 ? "★ ${fixed(r.stars / 1000, 1)}k" : "★ ${r.stars}"; fontSize: 11; color: yellow; width: 64; align: end }
+            Text { text: r.name; style: small; bold: true; maxLines: 1; weight: 1 }
+            Text { text: stars[i + 1]; style: small; color: muted; maxLines: 1; width: 64; align: end }
           }
-          if r.desc != "" { Text { text: r.desc; fontSize: 11; color: muted; maxLines: 2 } }
-          if r.lang != "" { Text { text: r.lang; fontSize: 10; color: accent } }
+          Text { text: r.lang != "" && r.desc != "" ? "${r.lang} · ${r.desc}" : r.lang + r.desc; style: small; color: muted; maxLines: 1 }
         }
       }
+    }
+  }
+
+  screen {
+    title: "github trending"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: top == null ? "…" : stars[0]; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: top == null ? (repos == null ? "Loading…" : "GitHub didn't answer") : "${top.name}, the most-starred new repo this week"; fontSize: 16; color: muted; maxLines: 2 }
+      }
+      Text { text: "Created in the last 7 days"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      if wide {
+        Row {
+          gap: 12
+          align: top
+          Repos { items: list.take(half); weight: 1 }
+          Repos { items: list.drop(half); from: half; weight: 1 }
+        }
+      } else {
+        Repos { items: list }
+      }
+      Text { text: "Open GitHub trending"; fontSize: 16; bold: true; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://github.com/trending") }
     }
   }
 }

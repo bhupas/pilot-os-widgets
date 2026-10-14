@@ -1,10 +1,10 @@
 widget "nostr git" {
   meta {
     description: "Trending repositories from the last 7 days. People published them to Nostr. The yellow number is how busy each one was."
-    version: "1.3"
+    version: "1.4"
     license: "MIT"
     category: "dev"
-    owl: 5
+    owl: 9
   }
   size: 6x4
   minSize: 4x3
@@ -19,78 +19,130 @@ widget "nostr git" {
   let repos = data.repos ?? []
   let people = data.people ?? []
 
-  component RepoRow(name, desc, meta, count, href, hop) {
-    Column {
-      gap: 0
-      onTap: url(href)
-      Row {
-        Text { text: name; fontSize: 13; bold: true; maxLines: 1; weight: 1 }
-        if hop != null {
-          Text {
-            text: "${hop}"
-            fontSize: 11
-            bold: true
-            width: 16
-            align: end
-            color: hop == 1 ? green : hop == 2 ? cyan : hop == 3 ? yellow : orange
-          }
-        }
-        Text {
-          text: "${count}"
-          fontSize: 11
-          color: yellow
-          width: 64
-          align: end
-        }
-      }
-      if desc != "" { Text { text: desc; fontSize: 11; color: muted; maxLines: 2 } }
-      if meta != "" { Text { text: meta; fontSize: 10; color: accent; maxLines: 1 } }
-    }
-  }
+  // The screen's tab, and the npub form: open, and what's typed in it.
+  state tab = "repos"
+  state editing = false
+  state draft = ""
 
+  let list = tab == "repos" ? repos : people
+  let top = first(repos)
+  let hopTint = [muted, green, cyan, yellow, orange]
+
+  onTap: screen()
+
+  // The busiest repo big, then as many more as fit; the yellow number is how busy each was.
   Column {
-    gap: 4
+    gap: 2
+    fill: true
     Row {
+      align: center
       gap: 8
-      Text {
-        text: "nostr git · this week"
-        style: muted
-        maxLines: 1
-        weight: 1
-        onTap: screen()
-      }
+      Text { text: "NOSTR GIT"; style: label; color: muted; weight: 1; maxLines: 1 }
       Box {
-        size: 22
-        radius: 11
+        size: 18
+        radius: 9
         clip: true
         background: foreground
-        Image {
-          src: mark
-          size: 22
-          fit: cover
-          onTap: url("https://gittr.space/explore")
-        }
+        Image { src: mark; size: 18; fit: cover }
       }
     }
     if data == null {
-      Text { text: raw == null ? "loading…" : "gittr is offline"; style: small; color: muted }
-      if raw != null { Button { text: "try again"; onTap: refresh() } }
+      Text { text: raw == null ? "Loading…" : "gittr is offline"; fontSize: 20; bold: true; maxLines: 1 }
+      Text { text: raw == null ? "" : "Tap to try again"; style: small; color: muted; maxLines: 1; visible: raw != null }
     } else if len(repos) == 0 {
-      Text { text: "no active repos yet"; style: small; color: muted }
+      Text { text: "No active repos yet"; fontSize: 20; bold: true; maxLines: 1 }
     } else {
+      Row {
+        align: center
+        Text { text: top.name; fontSize: 20; bold: true; maxLines: 1; weight: 1 }
+        Text { text: "${top.countLabel}"; style: small; color: yellow; maxLines: 1 }
+      }
+      Text { text: top.desc ?? ""; style: small; color: muted; maxLines: (rows ?? 4) >= 4 ? 2 : 1; visible: (top.desc ?? "") != "" }
+      Spacer { weight: 1 }
+      for r in repos.drop(1).take(max((rows ?? 4) * 3 - 7, 0)) key r.url {
+        Row {
+          gap: 8
+          Text { text: r.name; style: small; maxLines: 1; weight: 1 }
+          Text { text: "${r.countLabel}"; style: small; color: yellow; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  component Items() {
+    Column {
+      gap: 0
+      background: surface
+      radius: 28
+      clip: true
+      for r, i in list key r.url {
+        let hop = hops[r.pubkey]
+        Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+        Row {
+          gap: 12
+          align: center
+          padding: [20, 14]
+          onTap: url(r.url)
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: r.name; fontSize: 16; bold: true; maxLines: 1 }
+            Text { text: r.desc ?? ""; fontSize: 14; color: muted; maxLines: 2; visible: (r.desc ?? "") != "" }
+            Text { text: r.meta ?? ""; fontSize: 12; color: accent; maxLines: 1; visible: (r.meta ?? "") != "" }
+          }
+          Column {
+            gap: 4
+            align: end
+            Text { text: "${r.countLabel}"; fontSize: 14; bold: true; color: yellow; maxLines: 1 }
+            if hop != null {
+              Box {
+                size: 24; radius: 12; align: center
+                background: alpha(hopTint[clamp(hop, 0, 4)], 0.22)
+                Text { text: "${hop}"; fontSize: 12; bold: true; color: hopTint[clamp(hop, 0, 4)]; align: center }
+              }
+            }
+          }
+        }
+      }
+      if len(list) == 0 { Text { text: data == null ? "Loading…" : "Nothing this week."; fontSize: 16; color: muted; padding: [20, 16] } }
+    }
+  }
+
+  component Settings() {
+    Column {
+      gap: 12
+      Text { text: "Trust marks"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
       Column {
-        scroll: true
-        weight: 1
-        gap: 6
-        for r in repos key r.url {
-          let hop = hops[r.pubkey]
-          RepoRow {
-            name: r.name
-            desc: r.desc
-            meta: r.meta
-            count: r.countLabel
-            href: r.url
-            hop: hop
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: { draft = who; editing = true }
+          Text { text: "Your npub"; fontSize: 16; maxLines: 1 }
+          Text { text: who == "" ? "Off" : sub(who, 0, 14) + "…"; fontSize: 16; color: who == "" ? muted : accent; align: end; weight: 1; maxLines: 1 }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Text { text: "The coloured number is how many follows away an author is from you. Your npub stays on this phone; gittr uses it only to measure that distance."; style: small; color: muted; padding: [4, 8, 0, 0] }
+      Text { text: "gittr"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for l, i in [["Open gittr", "https://gittr.space"], ["Explore", "https://gittr.space/explore"], ["What is nostr git", "https://gittr.space/nostr-git"], ["Help", "https://gittr.space/help#launcher-widgets"]] {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: url(l[1])
+            Text { text: l[0]; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: "›"; fontSize: 18; color: muted }
           }
         }
       }
@@ -98,37 +150,65 @@ widget "nostr git" {
   }
 
   screen {
-    title: "people this week"
+    title: "nostr git"
     Column {
       scroll: true
-      gap: 8
-      Text {
-        text: "Your npub stays on this phone. gittr uses it only to measure distance."
-        style: small
-        color: muted
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: data == null ? (raw == null ? "…" : "Offline") : "${len(list)}"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: data == null ? (raw == null ? "Loading…" : "gittr can't be reached right now") : tab == "repos" ? "repositories busy this week" : "people publishing this week"; fontSize: 16; color: muted; maxLines: 1 }
       }
-      Input {
-        placeholder: "npub1… for trust marks"
-        text: who
-        onSubmit: { who = trim(value); refresh() }
-      }
-      for u in people key u.url {
-        let hop = hops[u.pubkey]
-        RepoRow {
-          name: u.name
-          desc: u.desc
-          meta: u.meta
-          count: u.countLabel
-          href: u.url
-          hop: hop
+      if data == null && raw != null {
+        Row {
+          Text { text: "Try again"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: refresh() }
         }
       }
       Row {
-        gap: 12
-        Text { text: "gittr"; color: accent; onTap: url("https://gittr.space") }
-        Text { text: "explore"; color: accent; onTap: url("https://gittr.space/explore") }
-        Text { text: "what is nostr git"; color: accent; onTap: url("https://gittr.space/nostr-git") }
-        Text { text: "help"; color: accent; onTap: url("https://gittr.space/help#launcher-widgets") }
+        gap: 8
+        for v in ["repos", "people"] {
+          Text { text: v == "repos" ? "Repos" : "People"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: tab == v ? mix(surface, accent, 0.22) : transparent; onTap: tab = v }
+        }
+      }
+      if (screenWidth ?? 0) > 600 {
+        Row {
+          gap: 16
+          Items { weight: 3 }
+          Settings { weight: 2 }
+        }
+      } else {
+        Items { }
+        Settings { }
+      }
+
+      if editing {
+        Sheet {
+          title: "Trust marks"
+          onDismiss: editing = false
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Text { text: "Your npub, to see how close each author is to you. It stays on this phone."; fontSize: 14; color: muted }
+            Input {
+              text: draft
+              placeholder: "npub1…"
+              focus: editing
+              onChange: draft = value
+              onSubmit: { who = trim(value); editing = false; refresh() }
+            }
+            Row {
+              gap: 8
+              align: center
+              if who != "" {
+                Text { text: "Remove"; fontSize: 15; color: red; padding: [8, 12]; onTap: { who = ""; editing = false; refresh() } }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = false }
+              Text { text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { who = trim(draft); editing = false; refresh() } }
+            }
+          }
+        }
       }
     }
   }

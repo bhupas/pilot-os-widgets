@@ -1,8 +1,8 @@
 widget "nba" {
   meta {
-    owl: 5
+    owl: 8
     description: "NBA scores from ESPN with team logos: live games first, then last night's finals and today's tip-offs. Tap for every game and both conference standings"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -49,19 +49,22 @@ widget "nba" {
   """) every 30m json timeout 120s
   source now = clock every 1m
 
+  // The screen's tab on a phone: scores or standings. Side by side on a wide screen.
   state view = "scores"
 
-  let all = games ?? []
+  // Each game with its two sides picked out, away first as ESPN lists them.
+  let all = (games ?? []).map(g => {id: g.id, at: g.at, state: g.state, detail: g.detail, teams: g.teams,
+    away: g.teams.find(t => t.side == 'away') ?? g.teams[1], home: g.teams.find(t => t.side == 'home') ?? g.teams[0]})
   let live = all.filter(g => g.state == 'in')
   let done = all.filter(g => g.state == 'post').reverse()
   let next = all.filter(g => g.state == 'pre')
-  let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
-  let picked = flatten([live, done.take(ceil(cap / 2)), next]).take(cap)
+  let picked = flatten([live, done.take(4), next])
+  let top = picked[0]
   let groups = table ?? []
-  let wide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
+  let tileWide = (tileWidth ?? 0) >= 280
+  let twoCols = (screenWidth ?? 0) > 600
   // A line under the last playoff seed, and under the play-in.
   let cuts = [6, 10]
-  let bLabel = "GB"
 
   component Badge(logo, px = 18) {
     if logo {
@@ -71,91 +74,163 @@ widget "nba" {
     }
   }
 
+  // One game on one line, for the tile: away on the left, at home on the right; the centre keeps one
+  // width so the logos and names line up down the list.
   component GameRow(g) {
-    let away = g.teams.find(t => t.side == 'away') ?? g.teams[1]
-    let home = g.teams.find(t => t.side == 'home') ?? g.teams[0]
+    let away = g.away
+    let home = g.home
     let live = g.state == 'in'
     let final = g.state == 'post'
-    let px = wide ? 18 : 14
-    let scW = wide ? 30 : 24
-    let dotW = wide ? 8 : 6
-    let stW = wide ? 104 : 40
+    let px = tileWide ? 18 : 14
+    let scW = tileWide ? 30 : 24
+    let dotW = tileWide ? 8 : 6
+    let stW = tileWide ? 104 : 40
     let ctrW = 2 * scW + 2 * dotW + stW
 
-    // Away on the left, at home on the right; the centre keeps one width so the
-    // logos and names line up down the list.
     Row {
-      gap: wide ? 8 : 4
+      gap: tileWide ? 8 : 4
+      align: center
       Badge { logo: away.logo; px: px }
-      Text { text: wide ? away.name : away.abbr; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
+      Text { text: tileWide ? away.name : away.abbr; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
       if g.state == 'pre' {
-        Text { text: fmtTime(g.at, wide ? "EEE HH:mm" : "HH:mm"); style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
+        Text { text: fmtTime(g.at, tileWide ? "EEE HH:mm" : "HH:mm"); style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
       } else {
         Row {
           width: ctrW; gap: 0; align: center
-          Text { text: away.score ?? '–'; style: small; width: scW; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground }
-          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : rgb(0, 0, 0, 0) }
+          Text { text: away.score ?? '–'; style: small; width: scW; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground; maxLines: 1 }
+          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : transparent }
           Text { text: g.detail; style: small; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
           Box { width: dotW }
-          Text { text: home.score ?? '–'; style: small; width: scW; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground }
+          Text { text: home.score ?? '–'; style: small; width: scW; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground; maxLines: 1 }
         }
       }
-      Text { text: wide ? home.name : home.abbr; style: small; weight: 1; maxLines: 1; align: end; color: final && !home.winner ? muted : foreground }
+      Text { text: tileWide ? home.name : home.abbr; style: small; weight: 1; maxLines: 1; align: end; color: final && !home.winner ? muted : foreground }
       Badge { logo: home.logo; px: px }
     }
   }
 
-  component TeamRow(t) {
+  // One side of a game in the screen: logo, team, score.
+  component Side(t, g) {
     Row {
-      gap: 6
-      Text { text: t.seed < 99 ? t.seed : '–'; width: 20; style: small; color: muted; align: end }
-      Badge { logo: t.logo; px: 16 }
-      Text { text: wide ? t.name : t.abbr; weight: 1; style: small; maxLines: 1 }
-      Text { text: t.rec; width: 56; style: small; bold: true; align: end }
-      Text { text: t.b ?? '–'; width: 36; style: small; color: muted; align: end }
+      gap: 12
+      align: center
+      Badge { logo: t.logo; px: 24 }
+      Text { text: t.name; fontSize: 16; weight: 1; maxLines: 1; color: g.state == 'post' && !t.winner ? muted : foreground }
+      Text { text: g.state == 'pre' ? "" : t.score ?? "–"; fontSize: 16; bold: g.state == 'post' && t.winner; color: g.state == 'in' ? accent : g.state == 'post' && !t.winner ? muted : foreground; width: 44; align: end; maxLines: 1 }
+    }
+  }
+
+  // A game as Google lists one: both sides stacked, and where it stands beside them.
+  component Game(g) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Column {
+        gap: 8
+        weight: 1
+        Side { t: g.away; g: g }
+        Side { t: g.home; g: g }
+      }
+      Spacer { width: 1; height: 44; background: border }
+      Text { text: g.state == 'pre' ? fmtTime(g.at, "EEE HH:mm") : g.detail; fontSize: 14; color: g.state == 'in' ? accent : muted; width: 76; maxLines: 2 }
+    }
+  }
+
+  component Section(name, list) {
+    Column {
+      gap: 12
+      visible: count(list) > 0
+      Text { text: name; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        for g, i in list key g.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Game { g: g }
+        }
+      }
+    }
+  }
+
+  component Scores() {
+    Column {
+      gap: 12
+      if count(all) == 0 {
+        Text { text: games == null ? "Loading…" : "No games yesterday, today or tomorrow."; fontSize: 16; color: muted; background: surface; radius: 28; padding: [20, 16] }
+      }
+      Section { name: "Live"; list: live }
+      Section { name: "Coming up"; list: next }
+      Section { name: "Final"; list: done }
     }
   }
 
   component Standings() {
-    for grp in groups {
-      Row {
-        Text { text: grp.name; style: label; color: muted; weight: 1 }
-        Text { text: bLabel; style: label; color: muted; width: 36; align: end }
+    Column {
+      gap: 12
+      if count(groups) == 0 {
+        Text { text: table == null ? "Loading…" : "No standings yet."; fontSize: 16; color: muted; background: surface; radius: 28; padding: [20, 16] }
       }
-      for t, i in grp.teams key t.id {
-        if i > 0 && cuts.contains(i) { Box { height: 7; fill: width  Row { width: 32; height: 1; background: border } } }
-        TeamRow { t: t }
+      for grp in groups {
+        Row {
+          gap: 12
+          padding: [4, 8, 20, 0]
+          Text { text: grp.name; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+          Text { text: "W-L"; fontSize: 14; color: muted; width: 56; align: end }
+          Text { text: "GB"; fontSize: 14; color: muted; width: 36; align: end }
+        }
+        Column {
+          gap: 0
+          background: surface; radius: 28; clip: true
+          for t, i in grp.teams key t.id {
+            // The playoff and play-in cut lines in the accent, other rows split by a hairline.
+            Spacer { height: 1; fill: width; background: cuts.contains(i) ? accent : border; visible: i > 0 }
+            Row {
+              gap: 12
+              align: center
+              padding: [20, 12]
+              Text { text: t.seed < 99 ? t.seed : '–'; fontSize: 14; color: muted; width: 20; align: end; maxLines: 1 }
+              Badge { logo: t.logo; px: 24 }
+              Text { text: t.name; fontSize: 16; weight: 1; maxLines: 1 }
+              Text { text: t.rec; fontSize: 16; bold: true; width: 56; align: end; maxLines: 1 }
+              Text { text: t.b ?? '–'; fontSize: 14; color: muted; width: 36; align: end; maxLines: 1 }
+            }
+          }
+        }
       }
     }
   }
 
   onTap: screen()
 
+  // The tile: the game that matters most (live, else last night's), big, then the rest as rows allow.
   Column {
+    gap: 2
+    fill: true
     Row {
-      Text { text: "NBA"; style: title; weight: 1; maxLines: 1 }
-      if count(live) > 0 {
-        Text { text: "${count(live)} live"; style: small; color: accent; width: 60; align: end; bold: true }
-      } else {
-        Text { text: fmtTime(now, "EEE d"); style: small; color: muted; width: 60; align: end }
-      }
+      align: center
+      Text { text: "NBA"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: count(live) > 0 ? "${count(live)} LIVE" : upper(fmtTime(now, "EEE d")); style: label; color: count(live) > 0 ? accent : muted; maxLines: 1; width: 64; align: end }
     }
-    Row {
-      Button { text: "scores"; weight: 1; color: view == "scores" ? accent : muted; onTap: view = "scores" }
-      Button { text: "standings"; weight: 1; color: view == "standings" ? accent : muted; onTap: view = "standings" }
-    }
-    Column {
-      weight: 1
-      scroll: true
-      if view == "scores" {
-        if count(picked) == 0 {
-          Text { text: games == null ? "loading…" : "no games today"; style: small; color: muted }
-        } else {
-          for g in picked key g.id { GameRow { g: g } }
+    if top == null {
+      Text { text: games == null ? null : "No games"; fontSize: 32; maxLines: 1 }
+      Text { text: "Nothing yesterday, today or tomorrow"; style: small; color: muted; maxLines: 1; visible: games != null }
+    } else {
+      for t in [top.away, top.home] {
+        Row {
+          gap: 8
+          align: center
+          Badge { logo: t.logo; px: 24 }
+          Text { text: tileWide ? t.name : t.abbr; fontSize: 20; weight: 1; maxLines: 1; color: top.state == 'post' && !t.winner ? muted : foreground }
+          Text { text: top.state == 'pre' ? "" : t.score ?? "–"; fontSize: 24; bold: true; maxLines: 1; color: top.state == 'in' ? accent : top.state == 'post' && !t.winner ? muted : foreground }
         }
-      } else {
-        Standings {}
       }
+      Text { text: top.state == 'pre' ? "Tip-off ${fmtTime(top.at, "EEE HH:mm")}" : top.detail; style: small; color: top.state == 'in' ? accent : muted; maxLines: 1 }
+    }
+    Spacer { weight: 1 }
+    Column {
+      gap: 4
+      for g in picked.drop(1).take(max((rows ?? 4) * 3 - 7, 0)) key g.id { GameRow { g: g } }
     }
   }
 
@@ -163,12 +238,31 @@ widget "nba" {
     title: "NBA"
     Column {
       scroll: true
-      Text { text: "scores"; style: title }
-      if count(all) == 0 { Text { text: "no games today"; style: small; color: muted } }
-      for g in all key g.id { GameRow { g: g } }
-      Text { text: "standings"; style: title }
-      Standings {}
-      Button { text: "close"; onTap: close() }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: games == null ? "…" : count(live) > 0 ? "${count(live)} live" : count(next) > 0 ? fmtTime(next[0].at, "HH:mm") : "No games"; fontSize: 48; bold: true; maxLines: 1; color: count(live) > 0 ? accent : foreground }
+        Text {
+          text: count(live) > 0 ? "On now · ${count(done)} final, ${count(next)} to come" : count(next) > 0 ? "Next tip-off, ${next[0].away.name} at ${next[0].home.name}, ${fmtTime(next[0].at, "EEEE")}" : "Scores from yesterday to tomorrow, and the standings"
+          fontSize: 16; color: muted; maxLines: 2
+        }
+      }
+      if twoCols {
+        Row {
+          gap: 24
+          Scores { weight: 1 }
+          Standings { weight: 1 }
+        }
+      } else {
+        // Tabs, the picked one tonal.
+        Row {
+          gap: 8
+          Text { text: "Scores"; fontSize: 16; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: view == "scores" ? mix(surface, accent, 0.22) : surface; onTap: view = "scores" }
+          Text { text: "Standings"; fontSize: 16; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: view == "standings" ? mix(surface, accent, 0.22) : surface; onTap: view = "standings" }
+        }
+        if view == "scores" { Scores { } } else { Standings { } }
+      }
     }
   }
 }

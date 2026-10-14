@@ -1,5 +1,5 @@
 widget "github" {
-  meta { description: "Unread GitHub notifications, reviews waiting on you and your open pull requests, via the GitHub CLI"; version: "1.1"; license: "MIT"; category: "dev" }
+  meta { owl: 8; description: "Unread GitHub notifications, reviews waiting on you and your open pull requests, via the GitHub CLI"; version: "1.2"; license: "MIT"; category: "dev" }
   size: 6x4
   minSize: 3x3
 
@@ -14,39 +14,113 @@ widget "github" {
       '{auth: true, unread: $unread, reviews: $reviews, mine: [$mine[] | {title, url, repo: .repository.name}]}'
   """) every 5m json timeout 30s
 
-  component Count(label, n, hot) {
-    Column {
-      gap: 0
-      Text { text: label; style: label }
-      Text { text: "${n}"; style: title; color: n > 0 ? hot : muted }
+  let mine = gh.mine ?? []
+  let wide = (screenWidth ?? 0) > 600
+
+  onTap: screen()
+
+  Column {
+    gap: 2
+    fill: true
+    Text { text: "GITHUB"; style: label; color: muted; maxLines: 1 }
+    if gh.auth == false {
+      Text { text: "Sign in"; fontSize: 32; maxLines: 1 }
+      Text { text: "The GitHub CLI isn't signed in"; style: small; color: muted; maxLines: 2 }
+    } else {
+      Text { text: gh == null ? "…" : "${gh.unread}"; fontSize: 40; color: gh.unread > 0 ? accent : foreground; maxLines: 1 }
+      Text { text: "unread · ${gh.reviews ?? "…"} to review · ${len(mine)} open"; style: small; color: muted; maxLines: 1 }
+      Spacer { weight: 1 }
+      // Your pull requests, as many as fit: three at 3 rows, four more per row after that.
+      for p in mine.take(max((rows ?? 3) * 4 - 9, 1)) key p.url {
+        Row {
+          align: center
+          Text { text: p.title; style: small; weight: 1; maxLines: 1 }
+          Text { text: p.repo; style: small; color: muted; width: 80; align: end; maxLines: 1; visible: (cols ?? 3) >= 4 }
+        }
+      }
     }
   }
 
-  onTap: url("https://github.com/notifications")
+  component Item(label, value, tint) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; weight: 1; maxLines: 1 }
+      Text { text: value; fontSize: 16; bold: true; color: tint; maxLines: 1 }
+    }
+  }
 
-  Column {
-    gap: 6
-    Text { text: "github"; style: muted }
-    if gh.auth == false {
-      Text { text: "the GitHub CLI isn't signed in"; style: small }
-      Button { text: "sign in"; onTap: terminal("gh auth login", "github") }
-    } else {
-      Row {
-        Count { label: "unread"; n: gh.unread; hot: accent; weight: 1 }
-        Count { label: "reviews"; n: gh.reviews; hot: yellow; weight: 1 }
-        Count { label: "my prs"; n: len(gh.mine); hot: foreground; weight: 1 }
-      }
+  component Lead() {
+    Column {
+      gap: 12
       Column {
-        scroll: true
-        weight: 1
-        gap: 4
-        for p in gh.mine key p.url {
-          Row {
+        gap: 0
+        Text { text: gh == null ? "…" : gh.auth == false ? "Signed out" : "${gh.unread}"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: gh.auth == false ? "Sign the GitHub CLI in to see your notifications" : "unread notification${gh.unread == 1 ? "" : "s"}"; fontSize: 16; color: muted; maxLines: 2 }
+      }
+      if gh.auth == false {
+        Text { text: "Sign in"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: terminal("gh auth login", "github") }
+      } else {
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Item { label: "Unread"; value: "${gh.unread ?? "…"}"; tint: gh.unread > 0 ? accent : muted }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Reviews waiting on you"; value: "${gh.reviews ?? "…"}"; tint: gh.reviews > 0 ? yellow : muted }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Your open pull requests"; value: "${len(mine)}"; tint: muted }
+        }
+        Text { text: "Open notifications"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://github.com/notifications") }
+      }
+    }
+  }
+
+  component Pulls() {
+    Column {
+      gap: 12
+      visible: gh.auth != false
+      Text { text: "Your pull requests"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for p, i in mine key p.url {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 2
+            padding: [20, 14]
             onTap: url(p.url)
-            Text { text: p.repo; fontSize: 11; color: muted; width: 80; maxLines: 1 }
-            Text { text: p.title; fontSize: 12; maxLines: 1; weight: 1 }
+            Text { text: p.title; fontSize: 16; maxLines: 2 }
+            Text { text: p.repo; fontSize: 14; color: muted; maxLines: 1 }
           }
         }
+        if len(mine) == 0 {
+          Text { text: gh == null ? "Loading…" : "No open pull requests."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "github"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Lead { weight: 1 }
+          Pulls { weight: 1 }
+        }
+      } else {
+        Lead { }
+        Pulls { }
       }
     }
   }

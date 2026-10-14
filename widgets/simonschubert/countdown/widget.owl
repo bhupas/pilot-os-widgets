@@ -1,5 +1,5 @@
 widget "countdown" {
-  meta { description: "Days until the dates listed in ~/.config/omarchy-proot/countdown, soonest first"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 8; description: "Days until the dates listed in ~/.config/omarchy-proot/countdown, soonest first"; version: "1.2"; license: "MIT"; category: "productivity" }
   size: 3x3
   minSize: 3x2
 
@@ -15,18 +15,99 @@ widget "countdown" {
   """) every 1h
   source now = clock every 60s
   let events = lines(dates).filter(l => l != "").map(l => { at: num(words(l)[0]), label: sub(l, len(words(l)[0]) + 1) }).filter(e => e.at > now - 86400).sortBy(e => e.at)
+    .map(e => { at: e.at, label: e.label, days: ceil((e.at - now) / 86400) })
+  let next = events[0]
+  // "12 days to christmas", or "christmas" on the day itself.
+  let until = next == null ? "" : next.days <= 0 ? next.label : "day${next.days == 1 ? "" : "s"} to ${next.label}"
+  let short = (rows ?? 3) < 3
+  let wide = (screenWidth ?? 0) > 600
 
-  onTap: terminal('$EDITOR ~/.config/omarchy-proot/countdown', "countdown")
+  onTap: screen()
 
   Column {
-    gap: 6
-    Text { text: "countdown"; style: muted }
-    for e, i in events.take(4) key e.label {
-      let days = ceil((e.at - now) / 86400)
-      Row {
-        align: bottom
-        Text { text: days <= 0 ? "today" : "${days}d"; fontSize: i == 0 ? 22 : 14; color: i == 0 ? accent : foreground; width: 64 }
-        Text { text: e.label; fontSize: 12; maxLines: 1; weight: 1 }
+    gap: 2
+    fill: true
+    if !short {
+      Text { text: "COUNTDOWN"; style: label; color: muted; maxLines: 1 }
+    }
+    if next == null {
+      Text { text: dates == null ? "…" : "None"; fontSize: 40; maxLines: 1 }
+      Text { text: "Tap to add dates"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: next.days <= 0 ? "Today" : "${next.days}"; fontSize: 40; color: accent; maxLines: 1 }
+      Text { text: until; style: small; color: muted; maxLines: 1 }
+      Spacer { weight: 1 }
+      // Then the dates after it, as many as fit: two at 3 rows, four more per row after that.
+      for e in events.drop(1).take(max((rows ?? 3) * 4 - 10, 0)) key e.label {
+        Row {
+          align: center
+          Text { text: e.label; style: small; weight: 1; maxLines: 1 }
+          Text { text: e.days <= 0 ? "today" : "${e.days}d"; style: small; color: muted; width: 48; align: end; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  component Lead() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: next == null ? (dates == null ? "…" : "No dates") : next.days <= 0 ? "Today" : "${next.days} day${next.days == 1 ? "" : "s"}"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: next == null ? "Add a date to count down to" : "${next.days <= 0 ? "" : "to "}${next.label} · ${fmtTime(next.at, "EEE d MMM yyyy")}"; fontSize: 16; color: muted; maxLines: 2 }
+      }
+      Text { text: "Edit dates"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: terminal('$EDITOR ~/.config/omarchy-proot/countdown', "countdown") }
+      Text { text: "One date a line, like 2026-12-24 christmas, in ~/.config/omarchy-proot/countdown."; fontSize: 14; color: muted }
+    }
+  }
+
+  component Dates() {
+    Column {
+      gap: 12
+      Text { text: "Coming up"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for e, i in events key e.label {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: e.label; fontSize: 16; maxLines: 1 }
+              Text { text: fmtTime(e.at, "EEE d MMM yyyy"); fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Text { text: e.days <= 0 ? "Today" : "${e.days} d"; fontSize: 16; color: i == 0 ? accent : muted; maxLines: 1 }
+          }
+        }
+        if len(events) == 0 {
+          Text { text: dates == null ? "Loading…" : "Nothing to count down to."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "countdown"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Lead { weight: 1 }
+          Dates { weight: 1 }
+        }
+      } else {
+        Lead { }
+        Dates { }
       }
     }
   }

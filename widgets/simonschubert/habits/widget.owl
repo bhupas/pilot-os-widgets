@@ -1,5 +1,5 @@
 widget "habits" {
-  meta { description: "A daily habit tracker: tap a habit to check it off for today, with the last week and your streak. Habits are listed in ~/.config/omarchy-proot/habits"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { description: "A daily habit tracker: tap a habit to check it off for today, with the last week and your streak. Habits are listed in ~/.config/omarchy-proot/habits"; version: "1.2"; license: "MIT"; category: "productivity"; owl: 8 }
   size: 6x3
   minSize: 4x2
 
@@ -16,41 +16,183 @@ widget "habits" {
   // Days counted back from noon, so summer time never skips or repeats a date.
   let noon = now - num(fmtTime(now, "H")) * 3600 - num(fmtTime(now, "m")) * 60 + 12 * 3600
   let days = range(60).map(i => fmtTime(noon - i * 86400, "yyyy-MM-dd"))
+  // Each habit with its last 60 days, today first. A streak still counts today until it's over: it runs up to
+  // yesterday if today isn't checked yet.
+  let stats = habits
+    .map(h => {name: h, hits: days.map(d => contains(done, "${h}@${d}"))})
+    .map(s => {name: s.name, hits: s.hits, run: s.hits[0] ? s.hits : drop(s.hits, 1)})
+    .map(s => {name: s.name, hits: s.hits, today: s.hits[0], key: "${s.name}@${days[0]}", week: count(take(s.hits, 7), x => x),
+      streak: indexOf(s.run, false) < 0 ? len(s.run) : indexOf(s.run, false)})
+  let total = len(stats)
+  let doneToday = count(stats, s => s.today)
+  let best = max(stats.map(s => s.streak)) ?? 0
+  let left = total - doneToday
+  // The last seven days, oldest first, for the week grid.
+  let week = range(7).map(i => noon - (6 - i) * 86400)
+
+  onTap: screen()
 
   Column {
-    gap: 6
+    gap: 2
+    fill: true
     Row {
-      onTap: terminal('$EDITOR ~/.config/omarchy-proot/habits', "habits")
-      Text { text: "habits"; style: muted; weight: 1 }
-      Text { text: "edit"; fontSize: 11; color: muted; width: 40; align: end }
+      align: center
+      Text { text: "HABITS"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: best > 0 ? "BEST ${best}D" : ""; style: label; color: accent; maxLines: 1; visible: best > 0 }
     }
+    Text { text: names == null ? "…" : "${doneToday} / ${total}"; fontSize: 40; maxLines: 1 }
+    Text { text: total == 0 ? "No habits yet" : left == 0 ? "All done today" : "${left} to go today"; style: small; color: muted; maxLines: 1 }
+    if (rows ?? 3) >= 3 {
+      Spacer { height: 6 }
+      // Tap one to check it off for today; the week runs left to right, today last.
+      Column {
+        scroll: true
+        weight: 1
+        gap: 6
+        for h in stats key h.name {
+          Row {
+            align: center
+            onTap: done = h.today ? done.filter(k => k != h.key) : drop(done + [h.key], max(len(done) + 1 - 600, 0))
+            Box {
+              size: 18; radius: 9; border: 1.5
+              borderColor: h.today ? accent : muted
+              background: h.today ? accent : transparent
+              animate background: tween(200ms, "ease")
+            }
+            Text { text: h.name; style: small; maxLines: 1; weight: 1 }
+            Row {
+              gap: 3
+              width: 74
+              for i in range(7) { Box { size: 8; radius: 4; background: h.hits[6 - i] ? accent : alpha(muted, 0.3) } }
+            }
+            Text { text: h.streak > 0 ? "${h.streak}d" : ""; style: small; color: h.streak >= 7 ? green : muted; width: 36; align: end; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  // Today's habits, each to check off, as a card.
+  component Today() {
+    Column {
+      gap: 12
+      Text { text: "Today"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for h, i in stats key h.name {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: { done = h.today ? done.filter(k => k != h.key) : drop(done + [h.key], max(len(done) + 1 - 600, 0)); haptic() }
+            Box {
+              size: 28; radius: 14; align: center; border: h.today ? 0 : 2
+              borderColor: muted
+              background: h.today ? accent : transparent
+              animate background: tween(200ms, "ease")
+              Text { text: h.today ? "󰄬" : ""; font: icon; fontSize: 16; color: background; align: center }
+            }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: h.name; fontSize: 16; maxLines: 1 }
+              Text { text: h.streak > 0 ? "${h.streak}-day streak · ${h.week} of the last 7" : "${h.week} of the last 7 days"; fontSize: 14; color: h.streak >= 7 ? green : muted; maxLines: 1 }
+            }
+          }
+        }
+        if total == 0 { Text { text: names == null ? "Loading…" : "No habits yet. Add them to the list below."; fontSize: 16; color: muted; padding: [20, 16] } }
+      }
+    }
+  }
+
+  // The last seven days for every habit, like a calendar strip.
+  component Week() {
+    Column {
+      gap: 12
+      Text { text: "This week"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 10
+        background: surface
+        radius: 28
+        clip: true
+        padding: [20, 16]
+        Row {
+          gap: 4
+          Spacer { weight: 1 }
+          for t, k in week {
+            Text { text: sub(fmtTime(t, "EEE"), 0, 1); style: label; color: k == 6 ? accent : muted; align: center; width: 24 }
+          }
+        }
+        for h in stats key h.name {
+          Row {
+            gap: 4
+            align: center
+            Text { text: h.name; fontSize: 14; maxLines: 1; weight: 1 }
+            for i in range(7) {
+              Box { width: 24; height: 24; align: center
+                Spacer { size: 14; radius: 7; background: h.hits[6 - i] ? accent : alpha(muted, 0.25) }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  component Settings() {
+    Column {
+      gap: 12
+      Text { text: "Your habits"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: terminal('$EDITOR ~/.config/omarchy-proot/habits', "habits")
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Edit the list"; fontSize: 16; maxLines: 1 }
+            Text { text: "One habit per line, in ~/.config/omarchy-proot/habits"; fontSize: 14; color: muted; maxLines: 2 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "habits"
     Column {
       scroll: true
-      weight: 1
-      gap: 8
-      for h in habits key h {
-        let hits = days.map(d => contains(done, "${h}@${d}"))
-        let key = "${h}@${days[0]}"
-        // A streak still counts today until it's over: it runs up to yesterday if today isn't checked yet.
-        let run = hits[0] ? hits : drop(hits, 1)
-        let streak = indexOf(run, false) < 0 ? len(run) : indexOf(run, false)
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: "${doneToday} of ${total}"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: total == 0 ? "No habits yet" : (left == 0 ? "All done today" : "${left} to go today") + (best > 0 ? " · best streak ${best} days" : ""); fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if (screenWidth ?? 0) > 600 {
         Row {
-          align: center
-          onTap: done = hits[0] ? done.filter(k => k != key) : drop(done + [key], max(len(done) + 1 - 600, 0))
-          Box {
-            size: 18; radius: 4; border: 1.5
-            borderColor: hits[0] ? accent : muted
-            background: hits[0] ? accent : transparent
-            animate background: tween(200ms, "ease")
+          gap: 16
+          Today { weight: 1 }
+          Column { gap: 12; weight: 1
+            Week { }
+            Settings { }
           }
-          Text { text: h; fontSize: 13; maxLines: 1; weight: 1 }
-          Row {
-            gap: 3
-            width: 74
-            for i in range(7) { Box { size: 8; radius: 4; background: hits[6 - i] ? accent : alpha(muted, 0.3) } }
-          }
-          Text { text: streak > 0 ? "${streak}d" : ""; fontSize: 12; color: streak >= 7 ? green : muted; width: 36; align: end }
         }
+      } else {
+        Today { }
+        Week { }
+        Settings { }
       }
     }
   }

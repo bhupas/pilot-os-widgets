@@ -2,7 +2,7 @@ widget "omarchy" {
   size: 4x3
   minSize: 3x3
   requires { pacman: [] }
-  meta { description: "Latest commits on omacom/omarchy, branch quattro. Tap the tile for the full feed, then a commit to open it."; version: "1.0"; license: "MIT"; category: "dev"; owl: 5 }
+  meta { description: "Latest commits on omacom/omarchy, branch quattro. Tap the tile for the full feed, then a commit to open it."; version: "1.1"; license: "MIT"; category: "dev"; owl: 8 }
 
   source now = clock every 1m
   // Public commits API. Android fetches it; no shell and no packages. Twenty commits stay well under the 1 MB cap.
@@ -16,16 +16,17 @@ widget "omarchy" {
     subject: first(split(c.commit.message ?? "", "\n")) ?? "",
     author: c.author.login ?? c.commit.author.name ?? "someone"
   })
-  let problem = raw == null || raw.ok ? null : raw.code == 403 ? "rate limited" : "github offline"
+  let problem = raw == null || raw.ok ? null : raw.code == 403 ? "Rate limited" : "GitHub offline"
   let wide = cols != null && cols >= 6
-  // A two-line row is ~30dp. Count from the tile height so the list fills it
-  // instead of stopping early and leaving the bottom blank.
-  let visible = commits.take(tileHeight == null ? 5 : clamp(floor((tileHeight - 28) / 30), 4, 20))
+  // Under the label and the newest commit (about 85dp, plus 30 of tile padding), a one-line row is ~16dp. Count
+  // from the tile height so the list fills it instead of stopping early and leaving the bottom blank.
+  let more = tileHeight == null ? 3 : clamp(floor((tileHeight - 116) / 16), 1, 19)
 
   onTap: screen()
 
   // iso is UTC, "2026-10-08T18:37:26Z". Days-from-civil, then a short age.
-  component Commit(c, now, fresh = false, full = false) {
+  // mode: "lead" (the newest, big, on the tile), "row" (one line on the tile) or "full" (a row in the app's card).
+  component Commit(c, now, mode = "row") {
     Column {
       gap: 0
       let iso = c.iso
@@ -43,52 +44,70 @@ widget "omarchy" {
       let at = (era * 146097 + doe - 719468) * 86400 + hh * 3600 + mm * 60 + ss
       let age = now - at
       let ago = iso == "" || now == null ? "…" : age < 45 ? "now" : age < 3600 ? "${floor(age / 60)}m" : age < 86400 ? "${floor(age / 3600)}h" : age < 604800 ? "${floor(age / 86400)}d" : fmtTime(at, "MMM d")
-      if full {
-        Column {
-          gap: 2
-          padding: [0, 8]
+      if mode == "full" {
+        Row {
+          gap: 16
+          align: top
+          padding: [20, 14]
           onTap: url(c.url)
-          Text { text: c.subject; style: body; maxLines: 3 }
-          Text { text: "${c.author} · ${ago} · ${c.short}"; style: small; color: muted; maxLines: 1 }
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: c.subject; fontSize: 16; maxLines: 3 }
+            Text { text: "${c.author} · ${c.short}"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+          Text { text: ago; fontSize: 14; color: muted; maxLines: 1 }
         }
+      } else if mode == "lead" {
+        Text { text: c.subject; fontSize: 18; bold: true; maxLines: 2 }
+        Text { text: "${c.author} · ${ago}"; style: small; color: accent; maxLines: 1 }
       } else {
         Row {
           gap: 8
-          align: top
-          Text { text: c.subject; style: small; bold: fresh; maxLines: 2; weight: 1 }
-          Column {
-            gap: 0
-            width: wide ? 84 : 48
-            Text { text: ago; style: label; color: fresh ? accent : muted; align: end; maxLines: 1 }
-            if wide {
-              Text { text: c.author; style: label; color: muted; align: end; maxLines: 1 }
-            }
-          }
+          align: center
+          Text { text: c.subject; style: small; weight: 1; maxLines: 1 }
+          Text { text: wide ? "${c.author} · ${ago}" : ago; style: small; color: muted; maxLines: 1 }
         }
       }
     }
   }
 
+  // The tile: the newest commit big, then as many older ones as fit.
   Column {
-    gap: 8
+    gap: 2
+    fill: true
     Row {
       align: center
-      Text { text: "omarchy"; style: muted; weight: 1 }
-      Text { text: raw == null ? "…" : "quattro"; style: label; color: accent; width: 64; align: end; maxLines: 1 }
+      Text { text: "OMARCHY"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: "QUATTRO"; style: label; color: accent; maxLines: 1 }
     }
-    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
     if raw == null {
-      Text { text: "loading…"; style: small; color: muted }
-    } else {
-      if problem != null {
-        Text { text: problem; style: small; color: muted }
-      } else {
-        Column {
-          gap: 8
-          for c, i in visible key c.sha {
-            Commit { c: c; now: now; fresh: i == 0 }
-          }
-        }
+      Text { text: "Loading…"; fontSize: 18; bold: true; color: muted; maxLines: 1 }
+    } else if problem != null {
+      Text { text: problem; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Tap to try again"; style: small; color: muted; maxLines: 1 }
+    } else if len(commits) > 0 {
+      Commit { c: commits[0]; now: now; mode: "lead" }
+      Spacer { height: 6 }
+      for c in commits.drop(1).take(more) key c.sha {
+        Commit { c: c; now: now }
+      }
+    }
+  }
+
+  // The app: how many commits and the newest one's age, then all of them in a card.
+  let twoCols = (screenWidth ?? 0) > 600
+  let half = ceil(len(commits) / 2)
+
+  component Feed(list) {
+    Column {
+      gap: 0
+      background: surface
+      radius: 28
+      clip: true
+      for c, i in list key c.sha {
+        Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+        Commit { c: c; now: now; mode: "full" }
       }
     }
   }
@@ -97,34 +116,32 @@ widget "omarchy" {
     title: "omarchy"
     Column {
       scroll: true
-      gap: 4
-      Row {
-        align: center
-        Text { text: "quattro"; style: label; color: accent; weight: 1 }
-        Text { text: raw == null ? "…" : "${len(commits)} commits"; style: label; color: muted; width: 96; align: end; maxLines: 1 }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: raw == null ? "Loading…" : problem ?? "${len(commits)} commits"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: problem != null ? "Try again in a few minutes" : "The latest on omacom/omarchy, branch quattro"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if len(commits) > 0 {
+        Text { text: "Commits"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        if twoCols {
+          Row {
+            gap: 12
+            align: top
+            Feed { list: commits.take(half); weight: 1 }
+            Feed { list: commits.drop(half); weight: 1 }
+          }
+        } else {
+          Feed { list: commits }
+        }
       }
       Row {
         gap: 8
-        justify: end
-        Button { text: "refresh"; color: muted; onTap: refresh() }
-        Button { text: "github ↗"; color: muted; onTap: url("https://github.com/omacom/omarchy/commits/quattro") }
+        Spacer { weight: 1 }
+        Text { text: "Refresh"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: refresh() }
+        Text { text: "Open on GitHub"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: url("https://github.com/omacom/omarchy/commits/quattro") }
       }
-      Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-      if raw == null {
-        Text { text: "loading…"; style: body; color: muted }
-      } else {
-        if problem != null {
-          Text { text: problem; style: body; color: muted }
-        } else {
-          for c, i in commits key c.sha {
-            if i > 0 {
-              Spacer { height: 1; fill: width; background: alpha(muted, 0.2) }
-            }
-            Commit { c: c; now: now; fresh: i == 0; full: true }
-          }
-        }
-      }
-      Spacer { height: 12 }
     }
   }
 }

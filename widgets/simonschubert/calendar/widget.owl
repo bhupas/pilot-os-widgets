@@ -1,25 +1,86 @@
 widget "calendar" {
-  meta { description: "This month's calendar with today highlighted"; version: "1.1"; license: "MIT"; category: "productivity" }
+  meta { owl: 8; description: "This month's calendar with today highlighted"; version: "1.2"; license: "MIT"; category: "productivity" }
   size: 3x3
   source now = clock every 60s
-  // Date math with only fmtTime: first weekday of the month, days in the month.
-  let day = num(fmtTime(now, "d"))
-  let first = now - (day - 1) * 86400
-  let offset = num(fmtTime(first, "e")) - 1
+  state shift = 0                 // months from this one, in the screen
+  // Date math with only fmtTime. Noon today, so day arithmetic never crosses midnight.
+  let noon = now - num(fmtTime(now, "H")) * 3600 - num(fmtTime(now, "m")) * 60 + 12 * 3600
+  let day = num(fmtTime(noon, "d"))
+  let first = noon - (day - 1) * 86400
+  let offset = (floor(first / 86400) + 3) % 7      // Monday first: 1970-01-01 was a Thursday
   let days = 32 - num(fmtTime(first + 31 * 86400, "d"))
+  let today = fmtTime(noon, "yyyy-MM-dd")
+  // The month shift months away: its middle, then back to its first day.
+  let mid = first + floor(shift * 30.44 + 15) * 86400
+  let month = mid - (num(fmtTime(mid, "d")) - 1) * 86400
+  let monthDays = 32 - num(fmtTime(month + 31 * 86400, "d"))
+  let lead = (floor(month / 86400) + 3) % 7
+  let cell = clamp(floor(((screenWidth ?? 360) - 48) / 7) - 4, 32, 56)
+
+  onTap: screen()
+
   Column {
     gap: 4
-    Text { text: fmtTime(now, "MMMM yyyy"); style: small; color: accent }
+    fill: true
+    Row {
+      align: center
+      Text { text: upper(fmtTime(now, "MMMM")); style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: fmtTime(now, "yyyy"); style: label; color: muted; maxLines: 1; width: 40; align: end }
+    }
     Grid {
       columns: 7
       gap: 2
-      for d in ["M", "T", "W", "T", "F", "S", "S"] { Text { text: d; fontSize: 9; color: muted; align: center } }
+      for d in ["M", "T", "W", "T", "F", "S", "S"] { Text { text: d; style: label; color: muted; align: center } }
       for i in range(offset + days) {
         Text {
           text: i < offset ? "" : str(i - offset + 1)
-          fontSize: 10; align: center
+          style: small; align: center; maxLines: 1
+          bold: i - offset + 1 == day
           color: i - offset + 1 == day ? background : foreground
           background: i - offset + 1 == day ? accent : transparent
+          radius: 8
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "calendar"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: fmtTime(now, "EEEE d"); fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: "${fmtTime(now, "MMMM yyyy")} · week ${fmtTime(now, "w")} · day ${fmtTime(now, "D")}"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      Row {
+        gap: 6
+        align: center
+        Text { text: fmtTime(month, "MMMM yyyy"); fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0]; weight: 1; maxLines: 1 }
+        Text { text: "‹"; fontSize: 20; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [18, 8]; onTap: shift = shift - 1 }
+        Text { text: "Today"; fontSize: 15; maxLines: 1; color: shift == 0 ? muted : background; background: shift == 0 ? surface : accent; radius: 24; padding: [18, 10]; onTap: shift = 0 }
+        Text { text: "›"; fontSize: 20; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [18, 8]; onTap: shift = shift + 1 }
+      }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        padding: [12, 16]
+        Grid {
+          columns: 7
+          gap: 4
+          for d in ["M", "T", "W", "T", "F", "S", "S"] { Text { text: d; style: label; color: muted; align: center } }
+          for i in range(lead + monthDays) {
+            let date = fmtTime(month + (i - lead) * 86400, "yyyy-MM-dd")
+            Box {
+              height: cell; radius: cell / 2; align: center
+              background: i >= lead && date == today ? accent : transparent
+              Text { text: i < lead ? "" : "${i - lead + 1}"; fontSize: 16; align: center; bold: i >= lead && date == today; color: i >= lead && date == today ? background : foreground }
+            }
+          }
         }
       }
     }

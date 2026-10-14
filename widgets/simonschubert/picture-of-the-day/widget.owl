@@ -1,5 +1,5 @@
 widget "picture of the day" {
-  meta { description: "Wikimedia Commons' picture of the day with its caption; tap to see the full image"; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { description: "Wikimedia Commons' picture of the day with its caption; tap to see the full image"; version: "1.2"; license: "MIT"; category: "fun"; owl: 8 }
   size: 6x4
   minSize: 3x3
   padding: 0
@@ -22,19 +22,97 @@ widget "picture of the day" {
     }' <<< "$info"
   """) every 1h json timeout 60s
 
-  onTap: url(pic.url ?? "https://commons.wikimedia.org/wiki/Commons:Picture_of_the_day")
+  let page = pic.url ?? "https://commons.wikimedia.org/wiki/Commons:Picture_of_the_day"
+  let hasArtist = pic.artist != "" && pic.artist != null
+  // The day is in the file's name: ~/.cache/potd/2026-10-14.jpg.
+  let dayText = match(pic.path ?? "", '(\d{4}-\d{2}-\d{2})\.jpg$')
+  let day = dayText == null ? null : parseTime(dayText[0], "yyyy-MM-dd")
 
+  onTap: screen()
+
+  // The picture is the tile; its caption sits on a band at the foot, as the photo apps do.
   Box {
     fill: true
     align: bottom
     if pic.path != null { Image { src: pic.path; fit: cover; fill: true } }
     Column {
       fill: width
-      gap: 0
-      padding: [10, 6]
+      gap: 2
+      padding: [14, 10]
       background: alpha(background, 0.75)
-      Text { text: pic.caption; fontSize: 12; maxLines: 2 }
-      if pic.artist != "" && pic.artist != null { Text { text: pic.artist; fontSize: 10; color: muted; maxLines: 1 } }
+      Text { text: "PICTURE"; style: label; color: muted; maxLines: 1 }
+      Text { text: pic == null ? "Loading…" : pic.caption; style: small; maxLines: (rows ?? 4) >= 4 ? 2 : 1 }
+      if hasArtist && (rows ?? 4) >= 4 { Text { text: pic.artist; style: small; color: muted; maxLines: 1 } }
+    }
+  }
+
+  component Item(label, value) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 2 }
+    }
+  }
+
+  component Picture() {
+    Box {
+      fill: width
+      height: min((screenWidth ?? 360) - 8, (screenHeight ?? 640) * 0.55)
+      background: surface
+      radius: 28
+      clip: true
+      align: center
+      if pic.path != null {
+        Image { src: pic.path; fit: contain; fill: true }
+      } else {
+        Text { text: pic == null ? "Loading…" : "No picture today"; fontSize: 16; color: muted }
+      }
+    }
+  }
+
+  component About() {
+    Column {
+      gap: 12
+      Column {
+        gap: 4
+        Text { text: day == null ? "Today" : fmtTime(day, "EEEE d MMMM"); fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Text { text: pic.caption ?? "…"; fontSize: 20; bold: true; padding: [4, 0, 0, 0] }
+      }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Item { label: "By"; value: hasArtist ? pic.artist : "Unknown" }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "From"; value: "Wikimedia Commons" }
+      }
+      Row {
+        gap: 8
+        Text { text: "Open on Commons"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: url(page) }
+        Text { text: "Share"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 12]; onTap: share(page) }
+      }
+    }
+  }
+
+  screen {
+    title: "picture of the day"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if (screenWidth ?? 0) > 600 {
+        Row {
+          gap: 16
+          Picture { weight: 3 }
+          About { weight: 2 }
+        }
+      } else {
+        Picture { }
+        About { }
+      }
     }
   }
 }

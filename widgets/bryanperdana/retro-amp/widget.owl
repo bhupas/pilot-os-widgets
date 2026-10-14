@@ -5,7 +5,7 @@ widget "retro amp" {
   minSize: 4x2
   padding: 0
 
-  meta { owl: 5; description: "A late-90s style music player for whatever is playing on the phone: spectrum, scrolling title, cover and song history, in classic or theme colors."; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "A late-90s style music player for whatever is playing on the phone: spectrum, scrolling title, cover and song history, in classic or theme colors."; version: "1.2"; license: "MIT"; category: "fun" }
 
   // Android's media sessions (YouTube Music, or any other player) and the media volume.
   source m = android.media
@@ -48,7 +48,8 @@ widget "retro amp" {
   let pushed = m.title == null || first(hist).title == m.title ? hist
     : take(flatten([[{title: m.title, artist: m.artist ?? m.app ?? "", at: now ?? 0}], hist]), 50)
   on m.title { hist = pushed }
-  let coverSize = min((screenWidth ?? 360) - 24, (screenHeight ?? 700) * 0.45)
+  // The cover on the screen's player card, inside its padding.
+  let coverSize = min((screenWidth ?? 360) - 48, (screenHeight ?? 700) * 0.45)
 
   // A raised key with its symbol; `lit` colors the symbol like the display.
   component Key(kind, lit = false) {
@@ -120,6 +121,9 @@ widget "retro amp" {
       }
     }
   }
+
+  // A tap anywhere but the keys, the slider and the title bar opens the full player.
+  onTap: screen()
 
   Column {
     gap: 0
@@ -238,102 +242,118 @@ widget "retro amp" {
     Keys { height: 36; fill: width; padding: [6, 4, 6, 6] }
   }
 
-  // Full screen: the cover, the controls and the songs played so far.
+  // Full screen: the player in its skin on a card, then the skin to pick and the songs played so far.
   screen {
     title: "retro amp"
     Column {
       scroll: true
-      fill: true
-      gap: 10
-      padding: 12
-      background: cBody
-      align: center
+      gap: 12
+      padding: [0, 4, 0, 24]
 
-      Box {
-        size: coverSize
-        background: cLcd
-        border: 2
-        borderColor: cHi
-        radius: 0
+      Column {
+        gap: 10
+        fill: width
+        padding: 16
+        background: cBody
+        radius: 28
         clip: true
         align: center
-        if has && m.art != null {
-          Image { src: m.art; fit: cover; fill: true }
-        } else {
-          Text { text: has ? "NO COVER" : "NO DISC"; font: mono; bold: true; color: cDim; align: center }
+
+        Box {
+          size: coverSize
+          background: cLcd
+          border: 2
+          borderColor: cHi
+          radius: 0
+          clip: true
+          align: center
+          if has && m.art != null {
+            Image { src: m.art; fit: cover; fill: true }
+          } else {
+            Text { text: has ? "NO COVER" : "NO DISC"; font: mono; bold: true; color: cDim; align: center }
+          }
+        }
+
+        Column {
+          gap: 2
+          fill: width
+          padding: [8, 6]
+          background: cLcd
+          border: 1
+          borderColor: cHi
+          radius: 0
+          Text { text: has ? m.title : "nothing playing"; bold: true; fontSize: 17; color: cLit; maxLines: 2 }
+          Text { text: has ? m.artist ?? m.app ?? "" : "eject opens YouTube Music"; fontSize: 13; color: cLit; maxLines: 1 }
+          if has && m.album != null {
+            Text { text: m.album; fontSize: 12; color: cStripe; maxLines: 1 }
+          }
+        }
+
+        Row {
+          gap: 8
+          fill: width
+          align: center
+          Text { text: clockText; font: mono; fontSize: 12; color: cTitle; width: 44; maxLines: 1 }
+          SeekBar { height: 12; weight: 1 }
+          Text { text: dur > 0 ? durText : "--:--"; font: mono; fontSize: 12; color: cTitle; width: 44; align: end; maxLines: 1 }
+        }
+
+        Keys { height: 44; fill: width }
+
+        Row {
+          gap: 6
+          fill: width
+          align: center
+          Text { text: "VOL"; fontSize: 11; font: mono; color: cTitle; width: 28 }
+          Slider { value: v.muted ? 0 : v.level; step: 100 / (v.steps ?? 15); live: true; weight: 1; height: 26; color: cStripe; track: cLo; onChange: volume(value) }
+          Text { text: v.muted ? "--" : "${round(v.level)}"; fontSize: 11; font: mono; color: cTitle; width: 28; align: end }
         }
       }
 
-      Column {
-        gap: 2
-        fill: width
-        padding: [8, 6]
-        background: cLcd
-        border: 1
-        borderColor: cHi
-        radius: 0
-        Text { text: has ? m.title : "nothing playing"; bold: true; fontSize: 17; color: cLit; maxLines: 2 }
-        Text { text: has ? m.artist ?? m.app ?? "" : "eject opens YouTube Music"; fontSize: 13; color: cLit; maxLines: 1 }
-        if has && m.album != null {
-          Text { text: m.album; fontSize: 12; color: cStripe; maxLines: 1 }
-        }
-      }
-
+      // The skin, as the tile's title bar switches it too.
+      Text { text: "Skin"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
       Row {
         gap: 8
-        fill: width
-        align: center
-        Text { text: clockText; font: mono; fontSize: 12; color: cTitle; width: 44 }
-        SeekBar { height: 12; weight: 1 }
-        Text { text: dur > 0 ? durText : "--:--"; font: mono; fontSize: 12; color: cTitle; width: 44; align: end }
-      }
-
-      Keys { height: 44; fill: width }
-
-      Row {
-        gap: 6
-        fill: width
-        align: center
-        Text { text: "VOL"; fontSize: 11; font: mono; color: cTitle; width: 28 }
-        Slider { value: v.muted ? 0 : v.level; step: 100 / (v.steps ?? 15); live: true; weight: 1; height: 26; color: cStripe; track: cLo; onChange: volume(value) }
-        Text { text: v.muted ? "--" : "${round(v.level)}"; fontSize: 11; font: mono; color: cTitle; width: 28; align: end }
+        Text { text: "Classic"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; bold: classic; background: classic ? mix(surface, accent, 0.22) : surface; onTap: skin = "classic" }
+        Text { text: "Theme colors"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; bold: !classic; background: !classic ? mix(surface, accent, 0.22) : surface; onTap: skin = "omarchy" }
       }
 
       Row {
-        fill: width
         align: center
-        Text { text: "PLAYLIST HISTORY"; font: mono; bold: true; fontSize: 12; color: cStripe; weight: 1 }
-        Text { text: "${len(hist)} songs"; font: mono; fontSize: 11; color: cTitle; width: 70; align: end }
-        Box { width: 56; height: 24; onTap: hist = []; align: center; background: cKey; border: 1; borderColor: cKeyHi; radius: 0
-          Text { text: "CLEAR"; font: mono; bold: true; fontSize: 10; color: cInk; align: center }
-        }
+        padding: [4, 8, 0, 0]
+        Text { text: "Played"; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+        Text { text: "${len(hist)} song${len(hist) == 1 ? "" : "s"}"; fontSize: 14; color: muted; maxLines: 1 }
       }
-
       Column {
         gap: 0
-        fill: width
-        padding: [0, 4]
-        background: cLcd
-        border: 1
-        borderColor: cHi
-        radius: 0
+        background: surface
+        radius: 28
+        clip: true
         if len(hist) == 0 {
-          Text { text: "no songs yet - they are added while this widget is on screen"; fontSize: 12; color: cDim; padding: [8, 8] }
+          Text { text: "No songs yet. They're added while this widget is on screen."; fontSize: 16; color: muted; padding: [20, 16] }
         }
         // Tap a song to look it up in YouTube Music.
         for h, i in hist key "${h.at}-${h.title}" {
           let cur = has && i == 0 && h.title == m.title
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
           Row {
-            gap: 6
-            fill: width
-            padding: [8, 5]
-            background: cur ? alpha(cLit, 0.18) : cLcd
+            gap: 16
+            align: center
+            padding: [20, 14]
+            background: cur ? mix(surface, accent, 0.22) : surface
             onTap: url("https://music.youtube.com/search?q=${replace(replace(replace(replace(replace("${h.artist} ${h.title}", "%", "%25"), "&", "%26"), "#", "%23"), "+", "%2B"), " ", "+")}")
-            Text { text: "${i + 1}."; font: mono; fontSize: 12; color: cur ? cTitle : cLit; width: 26; align: end }
-            Text { text: h.artist == "" ? h.title : "${h.artist} - ${h.title}"; fontSize: 13; color: cur ? cTitle : cLit; weight: 1; maxLines: 1 }
-            Text { text: fmtTime(h.at, "HH:mm"); font: mono; fontSize: 11; color: cDim; width: 40; align: end }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: h.title; fontSize: 16; bold: cur; maxLines: 1 }
+              Text { text: h.artist == "" ? "Unknown artist" : h.artist; fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Text { text: cur ? "Playing" : fmtTime(h.at, "HH:mm"); fontSize: 14; color: cur ? accent : muted; maxLines: 1 }
           }
         }
+      }
+      if len(hist) > 0 {
+        Text { text: "Clear history"; fontSize: 16; color: red; maxLines: 1; align: center; fill: width; background: surface; radius: 24; padding: [24, 14]; onTap: hist = [] }
       }
     }
   }

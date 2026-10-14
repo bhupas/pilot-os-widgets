@@ -2,7 +2,7 @@ widget "claude limits" {
   size: 6x3
   minSize: 3x2
 
-  meta { owl: 4; description: "Claude Code usage limits: 5-hour session and weekly, with reset times. Uses Claude Code's login on this device"; version: "1.0"; license: "MIT"; category: "dev" }
+  meta { owl: 8; description: "Claude Code usage limits: 5-hour session and weekly, with reset times. Uses Claude Code's login on this device"; version: "1.1"; license: "MIT"; category: "dev" }
   requires { pacman: ["jq", "curl"] }
 
   source now = clock every 30s
@@ -26,33 +26,83 @@ widget "claude limits" {
     esac
   """) every 5m json timeout 30s
 
-  let limits = u.limits ?? []
+  // Labels in sentence case: "5h session", "Week", "Week Opus".
+  let limits = (u.limits ?? []).map(l => {label: upper(sub(l.label, 0, 1)) + sub(l.label, 1, len(l.label)), pct: l.pct, resets: l.resets})
+  let lead = limits[0]
+  let small = (rows ?? 3) < 3
 
-  component Limit(label, pct, resets) {
+  component Limit(label, pct) {
     Column {
       gap: 2
       Row {
         gap: 6
-        Text { text: label; style: label; weight: 1 }
-        Text { text: "${pct}%"; fontSize: 14; width: 44; align: end; color: pct >= 90 ? red : pct >= 70 ? yellow : foreground }
+        Text { text: label; style: small; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "${pct}%"; style: small; maxLines: 1; color: pct >= 90 ? red : pct >= 70 ? yellow : foreground }
       }
       Progress { value: pct; color: pct >= 90 ? red : pct >= 70 ? yellow : accent; animate value: spring() }
-      if resets != null {
-        Text { text: resets > now ? "resets in ${fmtDuration(resets - now)}" : "reset"; fontSize: 11; color: muted }
+    }
+  }
+
+  onTap: screen()
+
+  // The tile: the session's share big, when it resets, then the weekly limits as bars when there's room.
+  Column {
+    gap: 2
+    fill: true
+    Text { text: "CLAUDE"; style: label; color: muted; maxLines: 1 }
+    Text { text: u == null ? "…" : u.error != null ? "–" : lead == null ? "–" : "${lead.pct}%"; fontSize: 40; maxLines: 1; color: lead.pct >= 90 ? red : lead.pct >= 70 ? yellow : foreground }
+    if u.error != null {
+      Text { text: u.error; style: small; color: red; maxLines: small ? 1 : 2 }
+    } else {
+      Text { text: lead == null ? "Loading" : lead.resets != null && lead.resets > now ? "${lead.label} · resets in ${fmtDuration(lead.resets - now)}" : lead.label; style: small; color: muted; maxLines: 1 }
+    }
+    if !small {
+      Spacer { weight: 1 }
+      Column {
+        gap: 6
+        for l in limits.drop(1).take(max(((rows ?? 3) - 2) * 2, 0)) key l.label {
+          Limit { label: l.label; pct: l.pct }
+        }
       }
     }
   }
 
-  onTap: refresh()
-
-  Column {
-    gap: 8
-    Text { text: "claude code limits"; style: muted }
-    if u.error != null {
-      Text { text: u.error; color: red }
-    }
-    for l in limits key l.label {
-      Limit { label: l.label; pct: l.pct; resets: l.resets }
+  screen {
+    title: "claude limits"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: u == null ? "…" : lead == null ? "–" : "${lead.pct}%"; fontSize: 48; bold: true; maxLines: 1; color: lead.pct >= 90 ? red : lead.pct >= 70 ? yellow : foreground }
+        Text { text: u == null ? "Loading" : u.error != null ? u.error : lead.resets != null && lead.resets > now ? "Of the ${lead.label} used · resets in ${fmtDuration(lead.resets - now)}" : "Of the ${lead.label} used"; fontSize: 16; color: u.error != null ? red : muted; maxLines: 2 }
+      }
+      Text { text: "Limits"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for l, i in limits key l.label {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 6
+            padding: [20, 14]
+            Row {
+              gap: 16
+              align: center
+              Text { text: l.label; fontSize: 16; weight: 1; maxLines: 1 }
+              Text { text: "${l.pct}%"; fontSize: 16; bold: true; maxLines: 1; color: l.pct >= 90 ? red : l.pct >= 70 ? yellow : foreground }
+            }
+            Progress { value: l.pct; fill: width; color: l.pct >= 90 ? red : l.pct >= 70 ? yellow : accent; animate value: spring() }
+            Text { text: l.resets == null ? "No reset time" : l.resets > now ? "Resets in ${fmtDuration(l.resets - now)} · ${fmtTime(l.resets, "EEE HH:mm")}" : "Reset"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+        if len(limits) == 0 { Text { text: u == null ? "Loading…" : u.error ?? "No limits reported."; fontSize: 16; color: u.error != null ? red : muted; padding: [20, 16] } }
+      }
+      Text { text: "The same numbers as /usage in Claude Code, read with the login it keeps on this device, every 5 minutes."; fontSize: 14; color: muted; padding: [8, 0] }
+      Text { text: "Refresh"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: refresh() }
     }
   }
 }

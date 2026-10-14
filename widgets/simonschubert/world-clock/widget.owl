@@ -1,5 +1,5 @@
 widget "world clock" {
-  meta { description: "A row of flip clocks with city nameplates. Tap it to add, rename, reorder or remove cities"; version: "1.4"; license: "MIT"; category: "time"; owl: 6 }
+  meta { description: "A row of flip clocks with city nameplates. Tap it to add, rename, reorder or remove cities"; version: "1.5"; license: "MIT"; category: "time"; owl: 9 }
   size: 6x2
   minSize: 3x2
   requires { pacman: ["tzdata"] }
@@ -7,6 +7,9 @@ widget "world clock" {
   // Each clock is {label, zone}, kept by the launcher. Version 1.1 kept them in a file; it's read once to carry them over.
   state clocks = null persist
   state query = ""
+  state adding = false            // the sheet that adds a city is open
+  state editing = -1              // the clock the edit sheet changes, by its place in clocks; -1 for none
+  state nameDraft = ""            // its nameplate, as typed
   source legacy = file("~/.config/omarchy-proot/world-clock")
   let legacyRows = lines(legacy ?? "").filter(l => !startsWith(l, "#")).map(l => words(l)).filter(w => len(w) >= 2)
   when clocks == null && legacy != null {
@@ -86,7 +89,7 @@ widget "world clock" {
   }
 
   if len(shown) == 0 {
-    Text { text: clocks == null || len(clocks) > 0 ? "…" : "no clocks yet, tap to add one"; style: muted; align: center; fill: true }
+    Text { text: clocks == null || len(clocks) > 0 ? "…" : "No clocks yet. Tap to add one"; style: muted; align: center; fill: true }
   } else if tall {
     Column {
       gap: 10
@@ -103,46 +106,148 @@ widget "world clock" {
     }
   }
 
+  let wide = (screenWidth ?? 0) > 600
+  let n = len(clocks ?? [])
+
+  component Lead() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: fmtTime(now, "HH:mm"); fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: "Here · ${fmtTime(now, "EEEE d MMMM")}"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      Text { text: "+ Add a city"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: { query = ""; adding = true } }
+    }
+  }
+
+  // Every clock, as Google's clock lists them: the place, its day and offset, and its time. A tap opens it to rename,
+  // move or remove.
+  component Clocks() {
+    Column {
+      gap: 12
+      Text { text: "Clocks"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for c, i in clocks ?? [] key "${i} ${c.zone}" {
+          let secs = off.find(o => o.zone == c.zone).secs
+          let t = now + (secs ?? 0)
+          let dd = floor(t / 86400) - floor((now + here) / 86400)
+          let diff = ((secs ?? here) - here) / 3600
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: { editing = i; nameDraft = c.label }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: c.label; fontSize: 16; maxLines: 1 }
+              Text { text: (dd == 0 ? "Today" : dd > 0 ? "Tomorrow" : "Yesterday") + (diff == 0 ? " · same time" : " · ${diff > 0 ? "+" : ""}${diff % 1 == 0 ? int(diff) : diff}h"); fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Text { text: secs == null ? "…" : "${pad(floor(t / 3600) % 24, 2, "0")}:${pad(floor(t / 60) % 60, 2, "0")}"; fontSize: 28; color: floor(t / 3600) % 24 < 6 || floor(t / 3600) % 24 >= 18 ? muted : foreground; width: 96; align: end; maxLines: 1 }
+          }
+        }
+        if n == 0 {
+          Text { text: "No clocks yet. Add a city to see its time."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+    }
+  }
+
   screen {
     title: "world clock"
     Column {
-      gap: 8
-      fill: true
+      gap: 12
       scroll: true
-      Text { text: "clocks"; style: label }
-      if len(clocks ?? []) == 0 {
-        Text { text: "none yet, search for a city below"; style: small; color: muted }
-      }
-      for c, i in clocks ?? [] key "${i} ${c.zone}" {
-        let secs = off.find(o => o.zone == c.zone).secs
-        let n = len(clocks)
+      padding: [0, 4, 0, 24]
+      if wide {
         Row {
-          gap: 6
-          align: center
-          fill: width
-          Button { text: "↑"; color: i == 0 ? border : muted; width: 32; onTap: clocks = i > 0 ? clocks.take(i - 1) + [c, clocks[i - 1]] + clocks.drop(i + 1) : clocks }
-          Button { text: "↓"; color: i == n - 1 ? border : muted; width: 32; onTap: clocks = i < n - 1 ? clocks.take(i) + [clocks[i + 1], c] + clocks.drop(i + 2) : clocks }
-          Input { text: c.label; placeholder: "nameplate"; weight: 1; onSubmit: clocks = trim(value) == "" ? clocks : clocks.take(i) + [{label: trim(value), zone: c.zone}] + clocks.drop(i + 1) }
-          Text { text: secs == null ? "…" : "${pad(floor((now + secs) / 3600) % 24, 2, "0")}:${pad(floor((now + secs) / 60) % 60, 2, "0")}"; font: mono; color: muted; width: 48; align: end }
-          Button { text: "×"; color: red; width: 32; onTap: clocks = clocks.take(i) + clocks.drop(i + 1) }
+          gap: 24
+          Lead { weight: 1 }
+          Clocks { weight: 1 }
+        }
+      } else {
+        Lead { }
+        Clocks { }
+      }
+
+      // A clock: its nameplate, its place in the row, or gone.
+      if editing >= 0 && editing < n {
+        Sheet {
+          title: clocks[editing].label
+          onDismiss: editing = -1
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: nameDraft
+              placeholder: "Nameplate"
+              onChange: nameDraft = value
+              onSubmit: {
+                if trim(value) != "" {
+                  clocks = clocks.take(editing) + [{label: trim(value), zone: clocks[editing].zone}] + clocks.drop(editing + 1)
+                }
+                editing = -1
+              }
+            }
+            Text { text: replace(clocks[editing].zone, "_", " "); fontSize: 14; color: muted }
+            Row {
+              gap: 8
+              if editing > 0 {
+                Text { text: "Move up"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { clocks = clocks.take(editing - 1) + [clocks[editing], clocks[editing - 1]] + clocks.drop(editing + 1); editing = editing - 1 } }
+              }
+              if editing < n - 1 {
+                Text { text: "Move down"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { clocks = clocks.take(editing) + [clocks[editing + 1], clocks[editing]] + clocks.drop(editing + 2); editing = editing + 1 } }
+              }
+            }
+            Row {
+              gap: 8
+              align: center
+              Text { text: "Delete"; fontSize: 15; color: red; padding: [8, 12]; onTap: { clocks = clocks.take(editing) + clocks.drop(editing + 1); editing = -1 } }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = -1 }
+              Text {
+                text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  if trim(nameDraft) != "" {
+                    clocks = clocks.take(editing) + [{label: trim(nameDraft), zone: clocks[editing].zone}] + clocks.drop(editing + 1)
+                  }
+                  editing = -1
+                }
+              }
+            }
+          }
         }
       }
-      Spacer { height: 8 }
-      Text { text: "add a city"; style: label }
-      Input { text: query; placeholder: "search a city or country"; fill: width; onChange: query = value }
-      if trim(query) != "" && len(found) == 0 {
-        Text { text: places == null ? "loading places…" : "nothing matches"; style: small; color: muted }
-      }
-      for p in found key p[0] {
-        Row {
-          gap: 8
-          align: center
-          fill: width
-          padding: [4, 6]
-          onTap: { clocks = (clocks ?? []) + [{label: p[1], zone: p[0]}]; query = ""; refresh() }
-          Text { text: "+"; color: accent; bold: true; width: 14 }
-          Text { text: p[1]; weight: 1; maxLines: 1 }
-          Text { text: p[2]; style: small; color: muted; width: 140; align: end; maxLines: 1 }
+
+      // A new city, from the tz database's list of places.
+      if adding {
+        Sheet {
+          title: "Add a city"
+          onDismiss: { adding = false; query = "" }
+          Column {
+            gap: 4
+            padding: [0, 4, 0, 4]
+            Input { text: query; placeholder: "Search a city or country"; focus: adding; onChange: query = value }
+            if trim(query) != "" && len(found) == 0 {
+              Text { text: places == null ? "Loading places…" : "Nothing matches"; fontSize: 16; color: muted; padding: [0, 12] }
+            }
+            for p in found key p[0] {
+              Row {
+                gap: 12
+                align: center
+                padding: [0, 12]
+                onTap: { clocks = (clocks ?? []) + [{label: p[1], zone: p[0]}]; query = ""; adding = false; refresh() }
+                Text { text: p[1]; fontSize: 16; weight: 1; maxLines: 1 }
+                Text { text: p[2]; fontSize: 14; color: muted; width: 140; align: end; maxLines: 1 }
+              }
+            }
+          }
         }
       }
     }

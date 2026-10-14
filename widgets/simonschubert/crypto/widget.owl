@@ -1,5 +1,5 @@
 widget "bitcoin" {
-  meta { description: "Bitcoin from CoinGecko: price, change over 1 hour, 24 hours and 7 days, the day's range and a 7-day chart. Tap it for market cap, volume, supply and the all-time high"; version: "2.0"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Bitcoin from CoinGecko: price, change over 1 hour, 24 hours and 7 days, the day's range and a 7-day chart. Tap it for market cap, volume, supply and the all-time high"; version: "2.1"; license: "MIT"; category: "world"; owl: 8 }
   size: 3x3
   minSize: 3x2
 
@@ -13,7 +13,7 @@ widget "bitcoin" {
   // CoinGecko updates the day's low and high less often than the price, so the price can be outside them.
   let low = min(b.low_24h, b.current_price)
   let high = max(b.high_24h, b.current_price)
-  let problem = market == null ? "…" : market.code == 429 ? "coingecko is busy, retrying" : b == null ? "coingecko offline" : null
+  let problem = market == null ? "…" : market.code == 429 ? "CoinGecko is busy, retrying" : b == null ? "CoinGecko is offline" : null
 
   // Whole dollars with thousands separators: $82,612.
   let usd = [b.current_price, low, high, min(week), max(week), b.ath].map(n => n == null ? "…" : [round(n)].map(r =>
@@ -23,19 +23,14 @@ widget "bitcoin" {
   // Trillions and billions: $1.66T, $33.5B.
   let cap = [b.market_cap, b.total_volume].map(n => n == null ? "…" : n >= 1000000000000 ? "$${fixed(n / 1000000000000, 2)}T" : "$${fixed(n / 1000000000, 1)}B")
   let at = high > low ? (b.current_price - low) / (high - low) : 0.5
+  // "+1.2%", as each change reads.
+  let pcts = [hour, day, days7, b.market_cap_change_percentage_24h].map(p => p == null ? "…" : "${p >= 0 ? "+" : ""}${fixed(p, 1)}%")
+  let wide = (screenWidth ?? 0) > 600
 
   onTap: screen()
 
   component Pct(p, size = 12, right = false) {
     Text { text: p == null ? "…" : "${p >= 0 ? "+" : ""}${fixed(p, 1)}%"; fontSize: size; bold: true; color: p == null ? muted : p >= 0 ? green : red; align: right ? "end" : "start"; maxLines: 1 }
-  }
-
-  component Change(label, p, size = 12) {
-    Column {
-      gap: 0
-      Text { text: label; style: label; color: muted; maxLines: 1 }
-      Pct { p: p; size: size }
-    }
   }
 
   // Where the price sits between the day's low and high.
@@ -51,75 +46,65 @@ widget "bitcoin" {
       }
       Row {
         Text { text: usd[1]; fontSize: size; color: muted; weight: 1; maxLines: 1 }
-        Text { text: "24h"; fontSize: size; color: muted; width: 32; align: center; maxLines: 1 }
+        Text { text: "24h"; fontSize: size; color: muted; width: 40; align: center; maxLines: 1 }
         Text { text: usd[2]; fontSize: size; color: muted; weight: 1; align: end; maxLines: 1 }
       }
     }
   }
 
-  component Stat(label, value, note, noteColor = muted) {
-    Column {
-      gap: 0
-      padding: [10, 8]
-      border: 1
-      borderColor: alpha(muted, 0.3)
-      Text { text: label; style: label; color: muted; maxLines: 1 }
-      Text { text: value; style: body; bold: true; maxLines: 1 }
-      Text { text: note; fontSize: 11; color: noteColor; maxLines: 1 }
+  component Item(label, value, note = "", tint = muted) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: label; fontSize: 16; maxLines: 1 }
+        Text { text: note; fontSize: 14; color: tint; maxLines: 1; visible: note != "" }
+      }
+      Text { text: value; fontSize: 16; bold: true; maxLines: 1 }
     }
   }
 
+  // The tile: the price big, the day's change by the label, then the week's chart and the day's range as rows allow.
   Column {
-    gap: 4
+    gap: 2
+    fill: true
     Row {
       align: center
-      Text { text: "bitcoin"; style: muted; weight: 1; maxLines: 1 }
+      Text { text: "BITCOIN"; style: label; color: muted; weight: 1; maxLines: 1 }
       Pct { p: day; right: true; width: 64 }
     }
     if problem != null {
-      Text { text: problem; style: small; color: muted }
+      Text { text: "…"; fontSize: 40; maxLines: 1 }
+      Text { text: problem; style: small; color: muted; maxLines: 2 }
     } else {
-      Text { text: price; style: title; maxLines: 1 }
-      Sparkline { values: week; min: min(week); max: max(week); color: days7 >= 0 ? green : red; area: true; fill: width; weight: 1 }
-      if rows >= 3 {
+      Text { text: price; fontSize: (cols ?? 3) >= 4 ? 40 : 32; maxLines: 1 }
+      Text { text: "7 days ${pcts[2]} · 1 hour ${pcts[0]}"; style: small; color: muted; maxLines: 1 }
+      if (rows ?? 3) >= 3 {
+        Sparkline { values: week; min: min(week); max: max(week); color: days7 >= 0 ? green : red; area: true; fill: width; weight: 1 }
+      }
+      if (rows ?? 3) >= 4 {
         Range { }
-        Row {
-          gap: 8
-          Change { label: "1h"; p: hour; weight: 1 }
-          Change { label: "24h"; p: day; weight: 1 }
-          Change { label: "7d"; p: days7; weight: 1 }
-        }
-      } else {
-        Row {
-          gap: 4
-          Text { text: "7d"; fontSize: 11; color: muted; width: 16 }
-          Pct { p: days7; size: 11; weight: 1 }
-        }
       }
     }
   }
 
-  screen {
-    title: "bitcoin"
-    if problem != null {
-      Text { text: problem; style: body; color: muted }
-    } else {
+  component Lead() {
+    Column {
+      gap: 12
       Column {
-        scroll: true
-        gap: 14
-        Column {
-          gap: 6
-          Text { text: price; fontSize: 40; bold: true }
-          Row {
-            gap: 24
-            Change { label: "1 hour"; p: hour; size: 16; weight: 1 }
-            Change { label: "24 hours"; p: day; size: 16; weight: 1 }
-            Change { label: "7 days"; p: days7; size: 16; weight: 1 }
-          }
-        }
-
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "last 7 days"; style: label; color: accent }
+        gap: 0
+        Text { text: price; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: "${pcts[1]} today · updated ${sub(b.last_updated, 11, 16)} UTC"; fontSize: 16; color: day >= 0 ? green : red; maxLines: 1 }
+      }
+      Text { text: "Last 7 days"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        background: surface
+        radius: 28
+        padding: 20
+        gap: 12
         Canvas {
           height: 184
           fill: width
@@ -138,34 +123,86 @@ widget "bitcoin" {
             text(d == 7 ? "now" : "${7 - d}d", 12 + d / 7 * (width - 24), 176, size: 10, align: center, color: muted)
           }
         }
-
         Range { size: 12 }
-
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "market"; style: label; color: accent }
-        Grid {
-          columns: 2
-          gap: 8
-          Stat { label: "market cap"; value: cap[0]; note: "${b.market_cap_change_percentage_24h >= 0 ? "+" : ""}${fixed(b.market_cap_change_percentage_24h, 1)}% today"; noteColor: b.market_cap_change_percentage_24h >= 0 ? green : red }
-          Stat { label: "24h volume"; value: cap[1]; note: "${fixed(b.total_volume / b.market_cap * 100, 1)}% of the cap" }
-          Stat { label: "all-time high"; value: usd[5]; note: "${fixed(b.ath_change_percentage, 1)}% · ${sub(b.ath_date, 0, 10)}"; noteColor: b.ath_change_percentage >= 0 ? green : red }
-          Stat { label: "rank"; value: "#${b.market_cap_rank}"; note: "by market cap" }
-        }
-
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "supply"; style: label; color: accent }
-        Column {
-          gap: 4
+      }
+      Text { text: "Change"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for c, i in [{label: "1 hour", p: hour}, {label: "24 hours", p: day}, {label: "7 days", p: days7}] {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
           Row {
-            Text { text: "${fixed(b.circulating_supply / 1000000, 2)}M mined"; style: body; weight: 1 }
-            Text { text: "of ${round(b.max_supply / 1000000)}M"; style: body; color: muted; width: 96; align: end }
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Text { text: c.label; fontSize: 16; weight: 1; maxLines: 1 }
+            Pct { p: c.p; size: 16 }
           }
-          Progress { value: b.circulating_supply; max: b.max_supply; color: accent }
-          Text { text: "${fixed(b.circulating_supply / b.max_supply * 100, 2)}% mined, ${round((b.max_supply - b.circulating_supply) / 1000)}k btc to go"; style: small; color: muted }
         }
+      }
+    }
+  }
 
-        Button { text: "open on coingecko"; onTap: url("https://www.coingecko.com/en/coins/bitcoin") }
-        Text { text: "data: coingecko · updated ${sub(b.last_updated, 11, 16)} utc"; style: label; color: muted }
+  component Market() {
+    Column {
+      gap: 12
+      Text { text: "Market"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Item { label: "Market cap"; value: cap[0]; note: "${pcts[3]} today"; tint: b.market_cap_change_percentage_24h >= 0 ? green : red }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "24h volume"; value: cap[1]; note: "${fixed(b.total_volume / b.market_cap * 100, 1)}% of the cap" }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "All-time high"; value: usd[5]; note: "${fixed(b.ath_change_percentage, 1)}% · ${sub(b.ath_date, 0, 10)}"; tint: b.ath_change_percentage >= 0 ? green : red }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Rank"; value: "#${b.market_cap_rank}"; note: "by market cap" }
+      }
+      Text { text: "Supply"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        background: surface
+        radius: 28
+        padding: 20
+        gap: 8
+        Row {
+          align: center
+          Text { text: "${fixed(b.circulating_supply / 1000000, 2)}M mined"; fontSize: 16; weight: 1; maxLines: 1 }
+          Text { text: "of ${round(b.max_supply / 1000000)}M"; fontSize: 16; color: muted; maxLines: 1 }
+        }
+        Progress { value: b.circulating_supply; max: b.max_supply; color: accent; fill: width }
+        Text { text: "${fixed(b.circulating_supply / b.max_supply * 100, 2)}% mined, ${round((b.max_supply - b.circulating_supply) / 1000)}k BTC to go"; fontSize: 14; color: muted }
+      }
+      Text { text: "Open on CoinGecko"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://www.coingecko.com/en/coins/bitcoin") }
+      Text { text: "Data from CoinGecko"; fontSize: 14; color: muted; align: center; fill: width }
+    }
+  }
+
+  screen {
+    title: "bitcoin"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if problem != null {
+        Column {
+          gap: 0
+          Text { text: "…"; fontSize: 48; bold: true; maxLines: 1 }
+          Text { text: problem; fontSize: 16; color: muted; maxLines: 2 }
+        }
+      } else if wide {
+        Row {
+          gap: 24
+          align: top
+          Lead { weight: 1 }
+          Market { weight: 1 }
+        }
+      } else {
+        Lead { }
+        Market { }
       }
     }
   }

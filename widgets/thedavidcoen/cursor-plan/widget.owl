@@ -3,8 +3,9 @@ widget "cursor plan" {
   minSize: 3x2
 
   meta {
+    owl: 8;
     description: "Cursor plan name with included and API usage percent from the local Cursor session";
-    version: "1.0";
+    version: "1.1";
     license: "MIT";
     category: "dev"
   }
@@ -48,62 +49,110 @@ widget "cursor plan" {
   let apiPct = data.ok ? round(data.apiPct) : null
   let planColor = planPct == null ? muted : planPct >= 90 ? red : planPct >= 75 ? yellow : accent
   let apiColor = apiPct == null ? muted : apiPct >= 90 ? red : apiPct >= 75 ? yellow : accent
+  let resets = data.ok && data.cycleEnd != null ? fmtTime(data.cycleEnd, "MMM d") : null
+  let short = (rows ?? 3) < 3
 
-  onTap: url("https://cursor.com/dashboard/usage")
+  onTap: screen()
+
+  component Usage(label, pct, tint) {
+    Column {
+      gap: 8
+      padding: [20, 14]
+      Row {
+        align: center
+        Text { text: label; fontSize: 16; maxLines: 1; weight: 1 }
+        Text { text: pct == null ? "…" : "${pct}%"; fontSize: 16; color: tint; maxLines: 1; width: 64; align: end }
+      }
+      Progress { value: pct ?? 0; color: tint; fill: width; animate value: spring() }
+    }
+  }
 
   Column {
-    gap: 6
-    Row {
-      gap: 6
-      align: center
-      Text { text: "cursor"; style: muted; weight: 1 }
-      if data.price != null && data.price != "" {
-        Text { text: data.price; style: small; color: muted; width: 56; align: end }
-      }
-    }
-    Text {
-      text: data == null ? "…" : data.ok ? data.plan : (data.error ?? "offline")
-      style: title
-      color: data.ok ? foreground : muted
-    }
-    Column {
-      gap: 2
+    gap: 2
+    fill: true
+    if !short {
       Row {
         align: center
-        Text { text: "plan"; style: label; weight: 1 }
-        Text {
-          text: planPct == null ? "…" : "${planPct}%"
-          style: small
-          color: planColor
-          width: 40
-          align: end
+        Text { text: "CURSOR"; style: label; color: muted; weight: 1; maxLines: 1 }
+        if data.price != null && data.price != "" {
+          Text { text: upper(data.price); style: label; color: muted; maxLines: 1; width: 64; align: end }
         }
       }
-      Progress { value: planPct ?? 0; color: planColor; animate value: spring() }
     }
+    if data == null {
+      Text { text: "…"; fontSize: 40; color: muted; maxLines: 1 }
+    } else if !data.ok {
+      Text { text: data.error ?? "offline"; fontSize: 18; bold: true; color: muted; maxLines: 2 }
+    } else {
+      Text { text: "${planPct}%"; fontSize: 40; color: planPct >= 75 ? planColor : foreground; maxLines: 1 }
+      Text { text: "of ${data.plan} · API ${apiPct}%"; style: small; color: muted; maxLines: 1 }
+      Spacer { weight: 1 }
+      if !short {
+        Progress { value: planPct ?? 0; color: planColor; fill: width; animate value: spring() }
+        if resets != null {
+          Text { text: data.limit > 0 ? "\$${fixed(data.included, 0)} of \$${fixed(data.limit, 0)} · resets ${resets}" : "Resets ${resets}"; style: small; color: muted; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "cursor"
     Column {
-      gap: 2
-      Row {
-        align: center
-        Text { text: "API"; style: label; weight: 1 }
-        Text {
-          text: apiPct == null ? "…" : "${apiPct}%"
-          style: small
-          color: apiColor
-          width: 40
-          align: end
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: planPct == null ? "…" : "${planPct}%"; fontSize: 48; bold: true; color: planPct != null && planPct >= 75 ? planColor : foreground; maxLines: 1 }
+        Text { text: data == null ? "Loading…" : !data.ok ? (data.error ?? "offline") : "of the ${data.plan} plan used" + (resets == null ? "" : " · resets ${resets}"); fontSize: 16; color: muted; maxLines: 2 }
+      }
+      if data.ok {
+        Text { text: "This period"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Usage { label: "Plan"; pct: planPct; tint: planColor }
+          Spacer { height: 1; fill: width; background: border }
+          Usage { label: "API"; pct: apiPct; tint: apiColor }
+          if data.limit > 0 {
+            Spacer { height: 1; fill: width; background: border }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              Text { text: "Included spend"; fontSize: 16; maxLines: 1; weight: 1 }
+              Text { text: "\$${fixed(data.included, 0)} of \$${fixed(data.limit, 0)}"; fontSize: 16; color: muted; maxLines: 1 }
+            }
+          }
+          if resets != null {
+            Spacer { height: 1; fill: width; background: border }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              Text { text: "Resets"; fontSize: 16; maxLines: 1; weight: 1 }
+              Text { text: fmtTime(data.cycleEnd, "EEE d MMM"); fontSize: 16; color: muted; maxLines: 1 }
+            }
+          }
+          if data.price != null && data.price != "" {
+            Spacer { height: 1; fill: width; background: border }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              Text { text: data.plan; fontSize: 16; maxLines: 1; weight: 1 }
+              Text { text: data.price; fontSize: 16; color: muted; maxLines: 1 }
+            }
+          }
+        }
+        if data.message != "" {
+          Text { text: data.message; fontSize: 14; color: muted; padding: [4, 8, 0, 0] }
         }
       }
-      Progress { value: apiPct ?? 0; color: apiColor; animate value: spring() }
-    }
-    if data.ok && data.cycleEnd != null {
-      Text {
-        text: data.limit > 0
-          ? "\$${fixed(data.included, 0)} / \$${fixed(data.limit, 0)} · resets ${fmtTime(data.cycleEnd, "MMM d")}"
-          : "resets ${fmtTime(data.cycleEnd, "MMM d")}"
-        style: small
-        color: muted
-      }
+      Text { text: "Open the dashboard"; fontSize: 16; bold: true; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://cursor.com/dashboard/usage") }
     }
   }
 }

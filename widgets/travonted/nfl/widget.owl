@@ -1,8 +1,8 @@
 widget "nfl" {
   meta {
-    owl: 5
+    owl: 8
     description: "NFL scores and standings from ESPN with team logos: live games first, then finals and this week's upcoming games. Tap for every game and both conferences"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -60,8 +60,9 @@ widget "nfl" {
     // Every row has the same shape - badge, team, centre, team, badge - and the
     // centre keeps one width whether or not there are scores in it, so the
     // badges and abbreviations line up down the whole list.
-    let vw = max(max(screenWidth ?? 0, tileWidth ?? 0), 240)
-    let wide = vw >= 280
+    let wide = (tileWidth ?? 0) >= 280
+    // Under 4 columns the logos would squeeze the names out.
+    let logos = (cols ?? 6) >= 4
     let px = wide ? 18 : 14
     let scW = wide ? 24 : 18
     let dotW = wide ? 8 : 6
@@ -75,66 +76,152 @@ widget "nfl" {
 
     Row {
       gap: gap
-      Badge { t: away; px: px }
-      Text { text: away.team.abbreviation; style: small; weight: 1; color: final && !away.winner ? muted : foreground }
+      align: center
+      if logos { Badge { t: away; px: px } }
+      Text { text: away.team.abbreviation; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
       if pre {
         Text { text: kick; style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
       } else {
         Row {
           width: ctrW; gap: 0; align: center
-          Text { text: away.score ?? '–'; style: small; width: scW; padding: [0, 0, 5, 0]; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground }
-          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : rgb(0, 0, 0, 0) }
+          Text { text: away.score ?? '–'; style: small; width: scW; padding: [0, 0, 5, 0]; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground; maxLines: 1 }
+          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : transparent }
           Text { text: detail; style: small; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
           Box { width: dotW }
-          Text { text: home.score ?? '–'; style: small; width: scW; padding: [5, 0, 0, 0]; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground }
+          Text { text: home.score ?? '–'; style: small; width: scW; padding: [5, 0, 0, 0]; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground; maxLines: 1 }
         }
       }
-      Text { text: home.team.abbreviation; style: small; weight: 1; align: end; color: final && !home.winner ? muted : foreground }
-      Badge { t: home; px: px }
+      Text { text: home.team.abbreviation; style: small; weight: 1; align: end; maxLines: 1; color: final && !home.winner ? muted : foreground }
+      if logos { Badge { t: home; px: px } }
     }
   }
 
-  component TeamRow(t) {
-    let diff = (t.stats.find(s => s.name == 'pointDifferential') ?? {}).value ?? 0
-    Row {
-      Text { text: (t.stats.find(s => s.name == 'playoffSeed') ?? {}).displayValue ?? '–'; width: 24; style: small; color: muted }
-      Text { text: t.team.abbreviation; weight: 1; style: small }
-      Text { text: (t.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '–'; width: 46; style: small; bold: true; align: end }
-      Text { text: (t.stats.find(s => s.name == 'pointDifferential') ?? {}).displayValue ?? '–'; width: 42; style: small; align: end; color: diff > 0 ? green : diff < 0 ? red : muted }
+  // The first game, big: the teams either side of the score (or the kickoff).
+  component Lead(g) {
+    let c = g.competitions[0]
+    let away = c.competitors.filter(t => t.homeAway == 'away')[0] ?? c.competitors[1]
+    let home = c.competitors.filter(t => t.homeAway == 'home')[0] ?? c.competitors[0]
+    let state = c.status.type.state
+    let parts = words(c.status.type.shortDetail)
+    let logos = (cols ?? 6) >= 4
+    Column {
+      gap: 0
+      Row {
+        gap: 6
+        align: center
+        if logos { Badge { t: away; px: 24 } }
+        Text { text: away.team.abbreviation; fontSize: 18; bold: true; weight: 1; maxLines: 1; color: state == 'post' && !away.winner ? muted : foreground }
+        Text { text: state == 'pre' ? get(parts, 2, '') + get(parts, 3, '') : "${away.score ?? '–'}–${home.score ?? '–'}"; fontSize: logos ? 32 : 28; bold: true; maxLines: 1; color: state == 'in' ? accent : foreground }
+        Text { text: home.team.abbreviation; fontSize: 18; bold: true; weight: 1; align: end; maxLines: 1; color: state == 'post' && !home.winner ? muted : foreground }
+        if logos { Badge { t: home; px: 24 } }
+      }
+      Text { text: c.status.type.shortDetail; style: small; color: state == 'in' ? accent : muted; align: center; fill: width; maxLines: 1 }
     }
   }
 
   onTap: screen()
 
+  // The tile: the first game big, then as many more as fit.
   Column {
+    gap: 2
+    fill: true
     Row {
-      Text { text: "NFL"; style: title; weight: 1 }
+      align: center
+      Text { text: "NFL"; style: label; color: muted; weight: 1; maxLines: 1 }
       if count(live) > 0 {
-        Text { text: "${count(live)} live"; style: small; color: accent; width: 60; align: end; bold: true }
+        Text { text: "${count(live)} LIVE"; style: label; color: accent; bold: true; maxLines: 1 }
       } else {
-        Text { text: fmtTime(now, "EEE d"); style: small; color: muted; width: 60; align: end }
+        Text { text: upper(fmtTime(now, "EEE d")); style: label; color: muted; maxLines: 1 }
       }
     }
-    Row {
-      Button { text: "scores"; weight: 1; color: view == "scores" ? accent : muted; onTap: view = "scores" }
-      Button { text: "standings"; weight: 1; color: view == "standings" ? accent : muted; onTap: view = "standings" }
+    if count(picked) == 0 {
+      Text { text: scores == null ? "…" : "No games"; fontSize: 40; maxLines: 1 }
+      Text { text: scores == null ? "Loading scores" : "None this week"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Lead { g: picked[0] }
+      Spacer { height: 4 }
+      Column {
+        gap: 4
+        weight: 1
+        clip: true
+        for g in picked.drop(1).take(max((rows ?? 4) * 3 - 5, 1)) key g.id { GameRow { g: g } }
+      }
     }
-    Column {
-      weight: 1
-      scroll: true
-      if view == "scores" {
-        if count(picked) == 0 {
-          Text { text: "no games this week"; style: small; color: muted }
-        } else {
-          for g in picked key g.id { GameRow { g: g } }
+  }
+
+  // The app: scores and standings on two tabs, each in cards; side by side on a wide screen.
+  let twoCols = (screenWidth ?? 0) > 600
+
+  // A game as Google lists it: away over home, each with its score, and the status beside them.
+  component Game(g) {
+    let c = g.competitions[0]
+    let state = c.status.type.state
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Column {
+        gap: 6
+        weight: 1
+        for t in [c.competitors.filter(t => t.homeAway == 'away')[0] ?? c.competitors[1], c.competitors.filter(t => t.homeAway == 'home')[0] ?? c.competitors[0]] {
+          Row {
+            gap: 12
+            align: center
+            Box { size: 24; Badge { t: t; px: 24 } }
+            Text { text: t.team.shortDisplayName ?? t.team.abbreviation; fontSize: 16; bold: state == 'post' && t.winner; color: state == 'post' && !t.winner ? muted : foreground; weight: 1; maxLines: 1 }
+            Text { text: state == 'pre' ? "" : t.score ?? '–'; fontSize: 16; bold: state != 'post' || t.winner; color: state == 'in' ? accent : state == 'post' && !t.winner ? muted : foreground; maxLines: 1 }
+          }
         }
-      } else {
-        for c in confs2 {
-          Text { text: c.abbreviation ?? c.name; style: label; color: muted }
-          for t, i in (c.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999) key t.team.id {
-            let seed = (t.stats.find(s => s.name == 'playoffSeed') ?? {}).value
-            if i > 0 && seed == 8 { Box { height: 7; fill: width  Row { width: 32; height: 1; background: border } } }
-            TeamRow { t: t }
+      }
+      Text { text: c.status.type.shortDetail; fontSize: 14; color: state == 'in' ? accent : muted; width: 96; align: end; maxLines: 2 }
+    }
+  }
+
+  component Section(name, list) {
+    Column {
+      gap: 12
+      Text { text: name; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for g, i in list key g.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Game { g: g }
+        }
+      }
+    }
+  }
+
+  component Conference(c) {
+    Column {
+      gap: 12
+      Row {
+        padding: [4, 8, 20, 0]
+        Text { text: c.abbreviation ?? c.name; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+        Text { text: "W-L"; fontSize: 14; color: muted; width: 56; align: end; maxLines: 1 }
+        Text { text: "Diff"; fontSize: 14; color: muted; width: 48; align: end; maxLines: 1 }
+      }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for t, i in (c.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999) key t.team.id {
+          let seed = (t.stats.find(s => s.name == 'playoffSeed') ?? {}).value
+          let diff = (t.stats.find(s => s.name == 'pointDifferential') ?? {}).value ?? 0
+          // A hairline between teams, and an accent one under the last playoff seed.
+          Spacer { height: 1; fill: width; background: i > 0 && seed == 8 ? accent : border; visible: i > 0 }
+          Row {
+            gap: 12
+            align: center
+            padding: [20, 12]
+            Text { text: (t.stats.find(s => s.name == 'playoffSeed') ?? {}).displayValue ?? '–'; fontSize: 14; color: muted; width: 20; align: end; maxLines: 1 }
+            Box { size: 22; Badge { t: t; px: 22 } }
+            Text { text: t.team.shortDisplayName ?? t.team.abbreviation; fontSize: 16; weight: 1; maxLines: 1 }
+            Text { text: (t.stats.find(s => s.name == 'overall') ?? {}).displayValue ?? '–'; fontSize: 16; bold: true; width: 56; align: end; maxLines: 1 }
+            Text { text: (t.stats.find(s => s.name == 'pointDifferential') ?? {}).displayValue ?? '–'; fontSize: 14; width: 48; align: end; maxLines: 1; color: diff > 0 ? green : diff < 0 ? red : muted }
           }
         }
       }
@@ -145,18 +232,63 @@ widget "nfl" {
     title: "NFL"
     Column {
       scroll: true
-      Text { text: "scores"; style: title }
-      for g in games key g.id { GameRow { g: g } }
-      Text { text: "standings"; style: title }
-      for c in confs2 {
-        Text { text: c.abbreviation ?? c.name; style: label; color: muted }
-        for t, i in (c.standings.entries ?? []).sortBy(e => (e.stats.find(s => s.name == 'playoffSeed') ?? {}).value ?? 999) key t.team.id {
-          let seed = (t.stats.find(s => s.name == 'playoffSeed') ?? {}).value
-          if i > 0 && seed == 8 { Box { height: 7; fill: width  Row { width: 32; height: 1; background: border } } }
-          TeamRow { t: t }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: scores == null ? "Loading…" : count(live) > 0 ? "${count(live)} live" : "${count(games)} games"; fontSize: 48; bold: true; color: count(live) > 0 ? accent : foreground; maxLines: 1 }
+        Text { text: scores == null ? "Scores from ESPN" : "${count(done)} final · ${count(next)} to come this week"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      Row {
+        gap: 8
+        for v in [["scores", "Scores"], ["standings", "Standings"]] {
+          Text { text: v[1]; fontSize: 16; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; color: view == v[0] ? foreground : muted; background: view == v[0] ? mix(surface, accent, 0.22) : transparent; onTap: view = v[0] }
         }
       }
-      Button { text: "close"; onTap: close() }
+      if view == "scores" {
+        if count(games) == 0 {
+          Text { text: scores == null ? "Loading scores…" : "No games this week."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+        }
+        if twoCols {
+          Row {
+            gap: 12
+            align: top
+            Column {
+              gap: 12
+              weight: 1
+              if count(live) > 0 { Section { name: "Live"; list: live } }
+              if count(done) > 0 { Section { name: "Final"; list: done } }
+            }
+            Column {
+              gap: 12
+              weight: 1
+              if count(next) > 0 { Section { name: "Coming up"; list: next } }
+            }
+          }
+        } else {
+          if count(live) > 0 { Section { name: "Live"; list: live } }
+          if count(done) > 0 { Section { name: "Final"; list: done } }
+          if count(next) > 0 { Section { name: "Coming up"; list: next } }
+        }
+      } else {
+        if table == null {
+          Text { text: "Loading standings…"; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+        }
+        if twoCols {
+          Row {
+            gap: 12
+            align: top
+            for c in confs2 { Conference { c: c; weight: 1 } }
+          }
+        } else {
+          for c in confs2 { Conference { c: c } }
+        }
+      }
+      Row {
+        gap: 8
+        Spacer { weight: 1 }
+        Text { text: "Refresh"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: refresh() }
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 widget "planes overhead" {
-  meta { description: "Aircraft around you on a live radar, from the OpenSky Network, located by IP or a city you type, via wttr.in. Tap it for every flight's altitude, speed and distance"; version: "1.1"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Aircraft around you on a live radar, from the OpenSky Network, located by IP or a city you type, via wttr.in. Tap it for every flight's altitude, speed and distance"; version: "1.2"; license: "MIT"; category: "world"; owl: 9 }
   size: 3x3
   minSize: 2x2
 
@@ -44,7 +44,17 @@ widget "planes overhead" {
     })
   let flights = planes.filter(p => p.x * p.x + p.y * p.y <= km * km).sortBy(p => p.x * p.x + p.y * p.y)
   let nearest = first(flights)
-  let problem = wx == null ? "locating…" : lat == null ? "location unknown" : sky == null ? "listening…" : sky.code == 429 ? "opensky's daily limit is used up" : !sky.ok ? "opensky offline" : null
+  let problem = wx == null ? "Locating…" : lat == null ? "Location unknown" : sky == null ? "Listening…" : sky.code == 429 ? "OpenSky's daily limit is used up" : !sky.ok ? "OpenSky is offline" : null
+
+  let place = area.areaName[0].value ?? ""
+  // Each flight's distance, in the units of where you are.
+  let listed = flights.map(f => {id: f.id, call: f.call, country: f.country, alt: f.alt, speed: f.speed, track: f.track, climb: f.climb,
+    dist: imperial ? "${round(sqrt(f.x * f.x + f.y * f.y) / 1.609)} mi" : "${round(sqrt(f.x * f.x + f.y * f.y))} km"})
+  let nearLine = problem != null ? problem : len(listed) == 0 ? "Clear skies within ${range}" : "${listed[0].call} · ${listed[0].dist} away"
+
+  // The city form: open, and what's typed in it.
+  state editing = false
+  state draft = ""
 
   onTap: screen()
 
@@ -95,78 +105,185 @@ widget "planes overhead" {
     }
   }
 
+  // The radar is the tile. Small, it's the radar alone; wide, the count and the nearest flight sit beside it.
+  let small = (rows ?? 3) < 3 || (cols ?? 3) < 3
+  let side = (cols ?? 3) >= 5
+
   Column {
-    gap: 4
-    Row {
-      Text { text: "planes overhead"; style: muted; weight: 1; maxLines: 1 }
-      Text { text: problem == null ? len(flights) : ""; style: muted; width: 32; align: end }
-    }
-    Box {
-      weight: 1
-      fill: width
-      Radar { list: flights; labels: cols >= 4 && rows >= 4; fill: true }
-      if problem != null {
-        Text { text: problem; style: small; color: muted; align: center }
+    gap: 2
+    fill: true
+    if !small {
+      Row {
+        align: center
+        Text { text: "PLANES"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: problem == null && !side ? "${len(flights)}" : ""; style: label; color: accent; maxLines: 1; visible: problem == null && !side }
       }
     }
-    if rows >= 3 {
-      Text {
-        text: problem != null ? "" : nearest == null ? "clear skies within ${range}" : "${nearest.call} · ${imperial ? "${round(sqrt(nearest.x * nearest.x + nearest.y * nearest.y) / 1.609)} mi" : "${round(sqrt(nearest.x * nearest.x + nearest.y * nearest.y))} km"} away"
-        style: small
-        maxLines: 1
+    if side {
+      Row {
+        gap: 12
+        weight: 1
+        align: center
+        Box {
+          fill: height
+          width: max((tileHeight ?? 160) - 40, 60)
+          Radar { list: flights; labels: (rows ?? 3) >= 4; fill: true }
+        }
+        Column {
+          gap: 2
+          weight: 1
+          Text { text: problem == null ? "${len(flights)}" : "…"; fontSize: 40; maxLines: 1 }
+          Text { text: len(flights) == 1 ? "flight within ${range}" : "flights within ${range}"; style: small; color: muted; maxLines: 1 }
+          Text { text: nearLine; style: small; maxLines: 2 }
+        }
+      }
+    } else {
+      Box {
+        weight: 1
+        fill: width
+        Radar { list: flights; labels: (cols ?? 3) >= 4 && (rows ?? 3) >= 4; fill: true }
+        if problem != null {
+          Text { text: problem; style: small; color: muted; align: center; fill: width }
+        }
+      }
+      if !small {
+        Text { text: nearLine; style: small; color: problem == null ? foreground : muted; maxLines: 1 }
+      }
+    }
+  }
+
+  component RadarCard() {
+    Column {
+      background: surface
+      radius: 28
+      clip: true
+      padding: 16
+      Radar { list: flights; labels: true; height: min((screenWidth ?? 360) - 40, (screenHeight ?? 640) * 0.5); fill: width }
+    }
+  }
+
+  component Flights() {
+    Column {
+      gap: 12
+      Text { text: "Flights"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for f, i in listed key f.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 14
+            align: center
+            padding: [20, 14]
+            onTap: url("https://globe.adsbexchange.com/?icao=${f.id}")
+            Plane { alt: f.alt; track: f.track; s: 8 }
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: f.call; fontSize: 16; bold: true; maxLines: 1 }
+              Text { text: f.country; fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Column {
+              gap: 0
+              width: 96
+              Text { text: "${imperial ? "${round(f.alt * 3.281 / 100) * 100} ft" : "${round(f.alt / 10) * 10} m"} ${f.climb > 1 ? "↑" : f.climb < -1 ? "↓" : ""}"; fontSize: 14; align: end; maxLines: 1 }
+              Text { text: imperial ? "${round(f.speed * 2.237)} mph" : "${round(f.speed * 3.6)} km/h"; fontSize: 14; color: muted; align: end; maxLines: 1 }
+            }
+            Text { text: f.dist; fontSize: 14; color: accent; width: 52; align: end; maxLines: 1 }
+          }
+        }
+        if len(listed) == 0 { Text { text: problem ?? "Clear skies within ${range}."; fontSize: 16; color: muted; padding: [20, 16] } }
+      }
+    }
+  }
+
+  component Where() {
+    Column {
+      gap: 12
+      Text { text: "Location"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: { draft = city; editing = true }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: city == "" ? "Where you are" : city; fontSize: 16; maxLines: 1 }
+            Text { text: city == "" ? "Found by your IP address · ${place}" : "${place}, ${area.country[0].value ?? ""}"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Row {
+        gap: 8
+        align: center
+        Text { text: "Live map"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: url("https://globe.adsbexchange.com/?lat=${lat}&lon=${lon}&zoom=9") }
+        Text { text: "Data: the OpenSky Network"; style: small; color: muted; maxLines: 2; weight: 1 }
       }
     }
   }
 
   screen {
     title: "planes overhead"
-    Input {
-      text: city
-      placeholder: "city · empty = auto"
-      onSubmit: { city = trim(value); refresh() }
-    }
     Column {
       scroll: true
-      gap: 10
-      Radar { list: flights; labels: true; height: min(screenWidth - 32, screenHeight * 0.55); fill: width }
-      Text {
-        text: problem ?? "${len(flights)} ${len(flights) == 1 ? "flight" : "flights"} within ${range} of ${lower(area.areaName[0].value)}"
-        style: small
-        color: muted
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: problem == null ? "${len(flights)}" : "…"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: problem ?? "${len(flights) == 1 ? "flight" : "flights"} within ${range} of ${place}"; fontSize: 16; color: muted; maxLines: 2 }
       }
-      Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-      for f in flights key f.id {
+      if (screenWidth ?? 0) > 600 {
         Row {
-          gap: 10
-          align: center
-          onTap: url("https://globe.adsbexchange.com/?icao=${f.id}")
-          Plane { alt: f.alt; track: f.track; s: 8 }
-          Column {
-            gap: 0
-            weight: 1
-            Text { text: f.call; font: mono; bold: true; maxLines: 1 }
-            Text { text: lower(f.country); style: small; color: muted; maxLines: 1 }
+          gap: 16
+          Column { gap: 12; weight: 1
+            RadarCard { }
+            Where { }
           }
+          Flights { weight: 1 }
+        }
+      } else {
+        RadarCard { }
+        Flights { }
+        Where { }
+      }
+
+      // Where to look: a city typed in, or empty to go by the IP address.
+      if editing {
+        Sheet {
+          title: "Location"
+          onDismiss: editing = false
           Column {
-            gap: 0
-            width: 96
-            Text { text: "${imperial ? "${round(f.alt * 3.281 / 100) * 100} ft" : "${round(f.alt / 10) * 10} m"} ${f.climb > 1 ? "↑" : f.climb < -1 ? "↓" : ""}"; style: small; align: end; maxLines: 1 }
-            Text { text: imperial ? "${round(f.speed * 2.237)} mph" : "${round(f.speed * 3.6)} km/h"; style: small; color: muted; align: end; maxLines: 1 }
-          }
-          Text {
-            text: imperial ? "${round(sqrt(f.x * f.x + f.y * f.y) / 1.609)} mi" : "${round(sqrt(f.x * f.x + f.y * f.y))} km"
-            style: small
-            color: accent
-            width: 48
-            align: end
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: draft
+              placeholder: "City, or empty for where you are"
+              focus: editing
+              onChange: draft = value
+              onSubmit: { city = trim(value); editing = false; refresh() }
+            }
+            Row {
+              gap: 8
+              align: center
+              if city != "" {
+                Text { text: "Clear"; fontSize: 15; color: red; padding: [8, 12]; onTap: { city = ""; editing = false; refresh() } }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = false }
+              Text { text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { city = trim(draft); editing = false; refresh() } }
+            }
           }
         }
-      }
-      Row {
-        gap: 8
-        align: center
-        Text { text: "data: the opensky network"; style: label; color: muted; weight: 1 }
-        Button { text: "live map ↗"; color: muted; onTap: url("https://globe.adsbexchange.com/?lat=${lat}&lon=${lon}&zoom=9") }
       }
     }
   }

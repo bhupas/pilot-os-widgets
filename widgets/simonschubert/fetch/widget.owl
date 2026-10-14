@@ -3,7 +3,7 @@ widget "fetch" {
   order: 2
   size: 3x3
   minSize: 3x2
-  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.2"; license: "MIT"; category: "system"; owl: 5 }
+  meta { description: "Your phone at a glance, fastfetch style, with or without Linux: CPU, memory, storage, battery and theme, plus Arch's packages once Linux is installed. Tap it for every detail"; version: "1.3"; license: "MIT"; category: "system"; owl: 8 }
 
   // The phone, from Android: works without Linux.
   source dev = android.device
@@ -27,6 +27,22 @@ widget "fetch" {
   let shown = sys.display
   let kernel = split(sys.kernel ?? "", "-")[0]
   let batColor = bat.level <= 15 ? red : bat.level <= 30 ? yellow : green
+  let short = (rows ?? 3) < 3
+  let wide = (screenWidth ?? 0) > 600
+
+  // fastfetch's lines, for the tile: as many as fit.
+  let lines = [
+    {k: "os", v: linux ? lx.os : dev == null ? null : "Android ${dev.android}"},
+    {k: "kernel", v: kernel},
+    {k: "uptime", v: sys.uptime == null ? null : fmtDuration(sys.uptime)},
+    {k: "packages", v: linux ? (lx.pkgs == null ? null : "${lx.pkgs} (pacman), ${sys.apps} (apps)") : "${sys.apps} (apps)"},
+    {k: "cpu", v: sys.cpu == null ? null : "${sys.cpu.soc == "" ? sys.cpu.hardware : sys.cpu.soc} (${sys.cpu.cores})"},
+    {k: "memory", v: mem == null ? null : "${fmtBytes(mem.used)} / ${fmtBytes(mem.total)} (${round(mem.used / mem.total * 100)}%)"},
+    {k: "disk", v: disk == null ? null : "${fmtBytes(disk.used)} / ${fmtBytes(disk.total)} (${round(disk.used / disk.total * 100)}%)"},
+    {k: "battery", v: bat == null ? null : "${bat.level}% · ${bat.status}"},
+    {k: linux ? "shell" : "display", v: linux ? lx.shell : shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz"},
+    {k: "theme", v: sys.theme ?? "default"}
+  ]
 
   onTap: screen()
 
@@ -47,14 +63,6 @@ widget "fetch" {
     }
   }
 
-  component Line(key, value, size = 10, keyWidth = 50) {
-    Row {
-      gap: 6
-      Text { text: key; fontSize: size; font: mono; color: accent; width: keyWidth }
-      Text { text: value; fontSize: size; font: mono; maxLines: 1; weight: 1 }
-    }
-  }
-
   component Palette(box) {
     Column {
       gap: 2
@@ -67,134 +75,216 @@ widget "fetch" {
     }
   }
 
-  component Heading(label) {
-    Column {
-      gap: 4
-      Spacer { height: 6 }
-      Text { text: label; style: label; color: accent }
-      Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+  component Item(label, value) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
     }
   }
 
   component Meter(label, used, total, tint = accent) {
     Column {
-      gap: 3
-      Line { key: label; value: total ? "${fmtBytes(used)} / ${fmtBytes(total)} (${round(used / total * 100)}%)" : null; size: 13; keyWidth: 110 }
-      Progress { value: round(used / total * 100) ?? 0; color: tint; padding: [116, 0, 0, 0] }
+      gap: 8
+      padding: [20, 14]
+      Row {
+        gap: 16
+        Text { text: label; fontSize: 16; maxLines: 1 }
+        Text { text: total ? "${fmtBytes(used)} of ${fmtBytes(total)}" : null; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
+      }
+      Progress { value: round(used / total * 100) ?? 0; color: tint; fill: width; height: 6 }
     }
   }
 
+  component Heading(label) {
+    Text { text: label; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+  }
+
+  component Line() {
+    Spacer { height: 1; fill: width; background: border }
+  }
+
+  // The tile: the logo and user@host, then fastfetch's lines as rows allow.
   Column {
-    gap: 1
-    Row {
-      gap: 8
-      align: center
-      Logo { arch: linux; size: 28 }
-      Column {
-        gap: 2
-        weight: 1
-        Text { text: "${user}@${host}"; fontSize: 11; font: mono; bold: true; color: accent; maxLines: 1 }
+    gap: 2
+    fill: true
+    if !short {
+      Row {
+        align: center
+        Text { text: "FETCH"; style: label; color: muted; weight: 1; maxLines: 1 }
         Row {
           gap: 2
-          for c in [red, green, yellow, blue, magenta, cyan] { Box { width: 10; height: 5; background: c } }
+          for c in [red, green, yellow, blue, magenta, cyan] { Box { width: 8; height: 4; background: c } }
         }
       }
     }
-    Spacer { height: 3 }
-    Line { key: "os"; value: linux ? lx.os : dev == null ? null : "Android ${dev.android}" }
-    Line { key: "host"; value: dev == null ? null : "${dev.maker} ${dev.model}" }
-    Line { key: "kernel"; value: kernel }
-    Line { key: "uptime"; value: sys.uptime == null ? null : fmtDuration(sys.uptime) }
-    Line { key: "packages"; value: linux ? (lx.pkgs == null ? null : "${lx.pkgs} (pacman), ${sys.apps} (apps)") : "${sys.apps} (apps)" }
-    if linux {
-      Line { key: "shell"; value: lx.shell }
-    } else {
-      Line { key: "display"; value: shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz" }
+    Row {
+      gap: 10
+      align: center
+      Logo { arch: linux; size: 32 }
+      Column {
+        gap: 0
+        weight: 1
+        Text { text: "${user}@${host}"; fontSize: 15; font: mono; bold: true; color: accent; maxLines: 1 }
+        Text { text: dev == null ? null : "${dev.maker} ${dev.model}"; style: small; color: muted; maxLines: 1 }
+      }
     }
-    Line { key: "theme"; value: sys.theme ?? "default" }
-    Line { key: "cpu"; value: sys.cpu == null ? null : "${sys.cpu.soc == "" ? sys.cpu.hardware : sys.cpu.soc} (${sys.cpu.cores})" }
-    Line { key: "memory"; value: mem == null ? null : "${fmtBytes(mem.used)} / ${fmtBytes(mem.total)} (${round(mem.used / mem.total * 100)}%)" }
-    Line { key: "disk"; value: disk == null ? null : "${fmtBytes(disk.used)} / ${fmtBytes(disk.total)} (${round(disk.used / disk.total * 100)}%)" }
-    Line { key: "battery"; value: bat == null ? null : "${bat.level}% · ${bat.status}" }
+    Spacer { height: 4 }
+    for l in lines.take(max((rows ?? 3) * 4 - 6, 2)) {
+      Row {
+        gap: 6
+        Text { text: l.k; fontSize: 10; font: mono; color: accent; width: 50; maxLines: 1 }
+        Text { text: l.v; fontSize: 10; font: mono; maxLines: 1; weight: 1 }
+      }
+    }
+  }
+
+  component Phone() {
+    Column {
+      gap: 12
+      Heading { label: "Phone" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Item { label: "Model"; value: dev == null ? null : "${dev.maker} ${dev.model}${sys.codename == null ? "" : " (${sys.codename})"}" }
+        // Android's own facts: absent where the launcher is Linux.
+        if dev.android != null {
+          Line { }
+          Item { label: "Android"; value: "${dev.android} (SDK ${dev.sdk})" }
+        }
+        if sys.patch != null {
+          Line { }
+          Item { label: "Security patch"; value: sys.patch }
+        }
+        Line { }
+        Item { label: "Build"; value: sys.build }
+        Line { }
+        Item { label: "Kernel"; value: sys.kernel }
+        Line { }
+        Item { label: "Uptime"; value: sys.uptime == null ? null : fmtDuration(sys.uptime) }
+        Line { }
+        Item { label: "Locale"; value: sys.locale == null ? null : "${sys.locale} · ${sys.timezone}" }
+      }
+      Heading { label: "Hardware" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Item { label: "CPU"; value: sys.cpu == null ? null : trim("${sys.cpu.maker} ${sys.cpu.soc == "" ? sys.cpu.hardware : sys.cpu.soc}") }
+        Line { }
+        Item { label: "Cores"; value: sys.cpu == null ? null : "${sys.cpu.cores} · ${sys.cpu.abi}${!sys.cpu.maxMhz ? "" : " · up to ${fixed(sys.cpu.maxMhz / 1000, 2)} GHz"}" }
+        Line { }
+        Item { label: "Display"; value: shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz${shown.dpi == null ? "" : " · ${shown.dpi} dpi"}" }
+        Line { }
+        Meter { label: "Memory"; used: mem.used; total: mem.total; tint: round(mem.used / mem.total * 100) > 85 ? red : accent }
+        Line { }
+        Meter { label: "Storage"; used: disk.used; total: disk.total; tint: round(disk.used / disk.total * 100) > 90 ? red : accent }
+      }
+    }
+  }
+
+  component Rest() {
+    Column {
+      gap: 12
+      Heading { label: "Battery" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Column {
+          gap: 8
+          padding: [20, 14]
+          Row {
+            gap: 16
+            Text { text: "Level"; fontSize: 16; maxLines: 1 }
+            Text { text: bat == null ? null : "${bat.level}% · ${bat.status}${bat.plugged == null ? "" : " (" + bat.plugged + ")"}"; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
+          }
+          Progress { value: bat.level ?? 0; color: batColor; fill: width; height: 6 }
+        }
+        if bat.temp != null {
+          Line { }
+          Item { label: "Temperature"; value: "${fixed(bat.temp, 1)} °C" }
+        }
+        if bat.voltage != null {
+          Line { }
+          Item { label: "Voltage"; value: "${fixed(bat.voltage, 2)} V" }
+        }
+        Line { }
+        Item { label: "Health"; value: bat.health ?? "unknown" }
+        if bat.cycles != null {
+          Line { }
+          Item { label: "Cycles"; value: bat.cycles }
+        }
+        if bat.technology != null {
+          Line { }
+          Item { label: "Technology"; value: bat.technology }
+        }
+      }
+      Heading { label: "Launcher" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Item { label: "Version"; value: sys.launcher }
+        Line { }
+        Item { label: "Theme"; value: sys.theme ?? "default" }
+        Line { }
+        Item { label: "Apps"; value: sys.apps == null ? null : "${sys.apps} Android apps" }
+      }
+      Heading { label: "Linux" }
+      if linux {
+        Column {
+          gap: 0
+          background: surface; radius: 28; clip: true
+          Item { label: "OS"; value: lx.os }
+          Line { }
+          Item { label: "Packages"; value: lx.pkgs == null ? null : "${lx.pkgs} (${lx.explicit} explicit)" }
+          Line { }
+          Item { label: "Shell"; value: lx.shell }
+          Line { }
+          Item { label: "Upgraded"; value: (lx.upgraded ?? "") == "" ? "never" : lx.upgraded }
+        }
+        Text { text: "Run fastfetch"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: terminal("command -v fastfetch >/dev/null || pacman -S --needed --noconfirm fastfetch; fastfetch", "fastfetch") }
+      } else {
+        Text { text: "Not installed. Arch Linux ARM adds a terminal, agents and pacman to the launcher."; fontSize: 16; color: muted; background: surface; radius: 28; padding: [20, 16] }
+        Text { text: "Install Linux"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: launcher("linux") }
+      }
+    }
   }
 
   screen {
     title: "fetch"
     Column {
       scroll: true
-      gap: 6
+      gap: 12
+      padding: [0, 4, 0, 24]
       Row {
         gap: 16
         align: center
-        Logo { arch: linux; size: 72 }
         Column {
-          gap: 6
+          gap: 0
           weight: 1
-          Text { text: "${user}@${host}"; fontSize: 18; font: mono; bold: true; color: accent; maxLines: 1 }
-          Text { text: "omalauncher ${sys.launcher} · ${lower(sys.theme ?? "default")}"; style: small; color: muted; maxLines: 1 }
-          Palette { box: 18 }
+          Text { text: dev == null ? null : dev.model; fontSize: 48; bold: true; maxLines: 2 }
+          Text { text: "${user}@${host} · Pilot OS ${sys.launcher ?? ""}"; fontSize: 16; color: muted; maxLines: 1 }
         }
+        Logo { arch: linux; size: 56 }
       }
-
-      Heading { label: "phone" }
-      Line { key: "host"; value: dev == null ? null : "${dev.maker} ${dev.model}${sys.codename == null ? "" : " (${sys.codename})"}"; size: 13; keyWidth: 110 }
-      // Android's own facts: absent where the launcher is Linux.
-      if dev.android != null {
-        Line { key: "android"; value: "${dev.android} (sdk ${dev.sdk})"; size: 13; keyWidth: 110 }
+      Row {
+        gap: 16
+        align: center
+        padding: [20, 16]
+        background: surface; radius: 28
+        Text { text: lower(sys.theme ?? "default"); fontSize: 16; weight: 1; maxLines: 1 }
+        Palette { box: 16 }
       }
-      if sys.patch != null {
-        Line { key: "security"; value: sys.patch; size: 13; keyWidth: 110 }
-      }
-      Line { key: "build"; value: sys.build; size: 13; keyWidth: 110 }
-      Line { key: "kernel"; value: sys.kernel; size: 13; keyWidth: 110 }
-      Line { key: "uptime"; value: sys.uptime == null ? null : fmtDuration(sys.uptime); size: 13; keyWidth: 110 }
-      Line { key: "locale"; value: sys.locale == null ? null : "${sys.locale} · ${sys.timezone}"; size: 13; keyWidth: 110 }
-
-      Heading { label: "hardware" }
-      Line { key: "cpu"; value: sys.cpu == null ? null : trim("${sys.cpu.maker} ${sys.cpu.soc == "" ? sys.cpu.hardware : sys.cpu.soc}"); size: 13; keyWidth: 110 }
-      Line { key: "cores"; value: sys.cpu == null ? null : "${sys.cpu.cores} · ${sys.cpu.abi}${!sys.cpu.maxMhz ? "" : " · up to ${fixed(sys.cpu.maxMhz / 1000, 2)} GHz"}"; size: 13; keyWidth: 110 }
-      Line { key: "display"; value: shown.width == null ? null : "${shown.width}x${shown.height} @ ${shown.hz}Hz${shown.dpi == null ? "" : " · ${shown.dpi} dpi"}"; size: 13; keyWidth: 110 }
-      Meter { label: "memory"; used: mem.used; total: mem.total; tint: round(mem.used / mem.total * 100) > 85 ? red : accent }
-      Meter { label: "storage"; used: disk.used; total: disk.total; tint: round(disk.used / disk.total * 100) > 90 ? red : accent }
-
-      Heading { label: "battery" }
-      Line { key: "level"; value: bat == null ? null : "${bat.level}% · ${bat.status}${bat.plugged == null ? "" : " (" + bat.plugged + ")"}"; size: 13; keyWidth: 110 }
-      Progress { value: bat.level ?? 0; color: batColor; padding: [116, 0, 0, 0] }
-      if bat.temp != null {
-        Line { key: "temperature"; value: "${fixed(bat.temp, 1)}°C"; size: 13; keyWidth: 110 }
-      }
-      if bat.voltage != null {
-        Line { key: "voltage"; value: "${fixed(bat.voltage, 2)} V"; size: 13; keyWidth: 110 }
-      }
-      Line { key: "health"; value: bat.health ?? "unknown"; size: 13; keyWidth: 110 }
-      if bat.cycles != null {
-        Line { key: "cycles"; value: bat.cycles; size: 13; keyWidth: 110 }
-      }
-      if bat.technology != null {
-        Line { key: "technology"; value: bat.technology; size: 13; keyWidth: 110 }
-      }
-
-      Heading { label: "launcher" }
-      Line { key: "version"; value: sys.launcher; size: 13; keyWidth: 110 }
-      Line { key: "theme"; value: sys.theme ?? "default"; size: 13; keyWidth: 110 }
-      Line { key: "apps"; value: sys.apps == null ? null : "${sys.apps} android apps"; size: 13; keyWidth: 110 }
-
-      Heading { label: "linux" }
-      if linux {
-        Line { key: "os"; value: lx.os; size: 13; keyWidth: 110 }
-        Line { key: "packages"; value: lx.pkgs == null ? null : "${lx.pkgs} (${lx.explicit} explicit)"; size: 13; keyWidth: 110 }
-        Line { key: "shell"; value: lx.shell; size: 13; keyWidth: 110 }
-        Line { key: "upgraded"; value: (lx.upgraded ?? "") == "" ? "never" : lx.upgraded; size: 13; keyWidth: 110 }
+      if wide {
         Row {
-          justify: end
-          Button { text: "fastfetch ↗"; color: muted; onTap: terminal("command -v fastfetch >/dev/null || pacman -S --needed --noconfirm fastfetch; fastfetch", "fastfetch") }
+          gap: 24
+          Phone { weight: 1 }
+          Rest { weight: 1 }
         }
       } else {
-        Text { text: "not installed. arch linux arm adds a terminal, agents and pacman to the launcher."; style: small; color: muted }
-        Row {
-          justify: end
-          Button { text: "install linux"; color: accent; onTap: launcher("linux") }
-        }
+        Phone { }
+        Rest { }
       }
     }
   }

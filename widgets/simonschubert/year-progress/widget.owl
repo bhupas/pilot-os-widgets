@@ -1,5 +1,5 @@
 widget "year progress" {
-  meta { description: "How much of today, this week, this month and this year has passed"; version: "1.1"; license: "MIT"; category: "time" }
+  meta { owl: 8; description: "How much of today, this week, this month and this year has passed"; version: "1.2"; license: "MIT"; category: "time" }
   size: 3x3
   minSize: 3x2
 
@@ -14,30 +14,105 @@ widget "year progress" {
   let monthDays = 32 - num(fmtTime(now - (d - 1) * 86400 + 31 * 86400, "d"))
   let y = num(fmtTime(now, "yyyy"))
   let yearDays = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) ? 366 : 365
+  let yearDay = num(fmtTime(now, "D"))
   let bars = [
     {label: "day", p: dayP},
     {label: "week", p: (weekday + dayP) / 7},
     {label: "month", p: (d - 1 + dayP) / monthDays},
-    {label: "year", p: (num(fmtTime(now, "D")) - 1 + dayP) / yearDays},
+    {label: "year", p: (yearDay - 1 + dayP) / yearDays},
   ]
+  // What's left of each, for the full view.
+  let left = [
+    fmtDuration(round((1 - dayP) * 86400 / 60) * 60) + " left",
+    weekday == 6 ? "Ends tonight" : "${6 - weekday} day${weekday == 5 ? "" : "s"} left after today",
+    "${monthDays - d} day${monthDays - d == 1 ? "" : "s"} left in ${fmtTime(now, "MMMM")}",
+    "${yearDays - yearDay} day${yearDays - yearDay == 1 ? "" : "s"} left in ${y}",
+  ]
+  let short = (rows ?? 3) < 3
+  let wide = (screenWidth ?? 0) > 600
 
+  onTap: screen()
+
+  // The tile: the year, then the day, week and month as small bars when there's room.
   Column {
-    gap: 6
+    gap: 2
     fill: true
-    justify: spaceBetween
-    Row {
-      align: bottom
-      Text { text: "${y}"; style: title; weight: 1 }
-      Text { text: "${fixed(bars[3].p * 100, 1)}%"; fontSize: 14; color: accent; width: 64; align: end }
+    if !short {
+      Row {
+        align: center
+        Text { text: "YEAR"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "${y}"; style: label; color: accent; width: 48; align: end; maxLines: 1 }
+      }
     }
-    for b in bars key b.label {
-      Column {
-        gap: 2
+    Text { text: "${fixed(bars[3].p * 100, 1)}%"; fontSize: short ? 32 : 40; maxLines: 1 }
+    Text { text: "${yearDays - yearDay} days left"; style: small; color: muted; maxLines: 1; visible: !short }
+    Spacer { weight: 1 }
+    if short {
+      Progress { value: bars[3].p * 100; fill: width; animate value: spring() }
+    } else {
+      for b in bars.take(3) key b.label {
         Row {
-          Text { text: b.label; fontSize: 11; color: muted; weight: 1 }
-          Text { text: "${floor(b.p * 100)}%"; fontSize: 11; width: 40; align: end }
+          gap: 8
+          align: center
+          Text { text: b.label; style: small; color: muted; width: 44; maxLines: 1 }
+          Progress { value: b.p * 100; weight: 1; color: foreground; animate value: spring() }
+          Text { text: "${floor(b.p * 100)}%"; style: small; width: 36; align: end; maxLines: 1 }
         }
-        Progress { value: b.p * 100; color: b.label == "year" ? accent : foreground; animate value: spring() }
+      }
+    }
+  }
+
+  component Lead() {
+    Column {
+      gap: 0
+      Text { text: "${fixed(bars[3].p * 100, 1)}%"; fontSize: 48; bold: true; maxLines: 1 }
+      Text { text: "of ${y} has passed · ${fmtTime(now, "EEEE d MMMM")}"; fontSize: 16; color: muted }
+    }
+  }
+
+  component Bars() {
+    Column {
+      gap: 12
+      Text { text: "So far"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for b, i in bars key b.label {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 8
+            padding: [20, 14]
+            Row {
+              align: center
+              Text { text: upper(sub(b.label, 0, 1)) + sub(b.label, 1); fontSize: 16; weight: 1; maxLines: 1 }
+              Text { text: "${fixed(b.p * 100, 1)}%"; fontSize: 16; color: b.label == "year" ? accent : foreground; width: 72; align: end; maxLines: 1 }
+            }
+            Progress { value: b.p * 100; fill: width; height: 8; color: b.label == "year" ? accent : foreground; animate value: spring() }
+            Text { text: left[i]; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  // The app: all four, with what's left of each.
+  screen {
+    title: "year progress"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          Lead { weight: 1 }
+          Bars { weight: 1 }
+        }
+      } else {
+        Lead { }
+        Bars { }
       }
     }
   }

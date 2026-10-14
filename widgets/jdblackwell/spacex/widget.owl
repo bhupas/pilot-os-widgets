@@ -3,10 +3,10 @@ widget "spacex" {
   minSize: 3x3
   meta {
     description: "Upcoming SpaceX launches, booster landings, dockings and splashdowns, with the webcast when one is on."
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
-    owl: 5
+    owl: 8
   }
 
   // Launch Library 2.3.0. Detailed launches include the webcast links (list mode leaves them out).
@@ -193,83 +193,129 @@ widget "spacex" {
   let upcoming = items.drop(1).take(extraN)
   let notice = !ready ? "" : launches.ok != true && events.ok != true ? "schedule offline" : launches.ok != true ? "launches offline" : events.ok != true ? "events offline" : ""
 
+  let wide = (screenWidth ?? 0) > 600
+
   onTap: screen()
 
-  component Rule() {
-    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
+  // A labelled row of the next one's details, in a card.
+  component Item(label, value, tint = foreground) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: tint; align: end; weight: 1; maxLines: 2 }
+    }
   }
 
-  component Activity(kind, title, when, detail, clock, live, link, host, tint) {
-    Column {
-      gap: 1
-      padding: [0, 8]
-      Row {
-        gap: 8
-        align: center
-        Text { text: kind; style: label; color: accent; width: 78; maxLines: 1 }
-        Column {
-          gap: 0
-          weight: 1
-          Text { text: title; maxLines: 2 }
-          Text { text: detail; style: small; color: muted; maxLines: 1 }
-        }
-        Text { text: when; style: small; color: tint; width: 72; align: end; maxLines: 1 }
+  // The tile: how long until the next one, big, what and where under it, then what follows as rows allow.
+  Column {
+    gap: 2
+    fill: true
+    Row {
+      align: center
+      Text { text: "SPACEX"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: upper(hero.status ?? ""); style: label; color: [hero.status].map(tone)[0]; width: 64; align: end; maxLines: 1; visible: hero != null }
+    }
+    if !ready {
+      Text { text: "…"; fontSize: 40; maxLines: 1 }
+    } else if hero == null {
+      Text { text: "None"; fontSize: 40; maxLines: 1 }
+      Text { text: notice != "" ? notice : "Nothing scheduled"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: hero.when; fontSize: (cols ?? 3) >= 4 ? 40 : 34; color: hero.urgency; maxLines: 1 }
+      Text { text: hero.title; fontSize: 16; bold: true; maxLines: 1 }
+      Text { text: "${hero.kind}${hero.place != "" ? " · " + hero.place : ""}"; style: small; color: muted; maxLines: 1 }
+      Text { text: notice != "" ? notice : hero.clock; style: small; color: notice != "" ? yellow : muted; maxLines: 1 }
+      if hero.live {
+        Spacer { height: 4 }
+        Button { text: hero.host == "" ? "watch" : "watch on ${hero.host}"; fill: width; onTap: url(hero.link) }
       }
-      Text { text: clock; style: small; color: muted; maxLines: 1 }
-      if live {
-        Button { text: host == "" ? "watch" : "watch on ${host}"; fill: width; onTap: url(link) }
+      Spacer { weight: 1 }
+      for e in upcoming key e.id {
+        Row {
+          align: center
+          Text { text: e.kind == "return" ? "${e.title} · ${e.place}" : e.title; style: small; weight: 1; maxLines: 1 }
+          Text { text: e.when; style: small; color: e.urgency; width: 68; align: end; maxLines: 1 }
+        }
       }
     }
   }
 
-  Column {
-    gap: 2
-    if !ready {
-      Text { text: "spacex"; style: label; color: accent }
-      Spacer { weight: 1 }
-      Text { text: "…"; style: title }
-      Spacer { weight: 1 }
-    } else if hero == null {
-      Text { text: "spacex"; style: label; color: accent }
-      Spacer { weight: 1 }
-      Text { text: notice != "" ? notice : "nothing scheduled"; style: body; color: muted }
-      Spacer { weight: 1 }
-    } else {
-      Row {
-        align: center
-        Text { text: "spacex"; style: label; color: accent; weight: 1; maxLines: 1 }
-        Text { text: lower(hero.status); style: label; color: [hero.status].map(tone)[0]; width: 64; align: end; maxLines: 1 }
+  component Lead() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: !ready ? "…" : hero == null ? "Nothing scheduled" : hero.when; fontSize: 48; bold: true; color: hero == null ? foreground : hero.urgency; maxLines: 1 }
+        Text { text: hero == null ? (notice != "" ? notice : "Launches, landings and returns") : "${hero.title} · ${hero.kind}"; fontSize: 16; color: muted; maxLines: 2 }
       }
-      if notice != "" {
-        Text { text: notice; style: small; color: yellow; maxLines: 1 }
+      if notice != "" && hero != null {
+        Text { text: notice; fontSize: 14; color: yellow; maxLines: 1 }
       }
-      Text { text: hero.when; fontSize: 30; color: hero.urgency; maxLines: 1 }
-      Text { text: hero.title; style: title; maxLines: 2 }
-      Text { text: "${hero.kind}${hero.place != "" ? " · " + hero.place : ""}"; style: small; color: muted; maxLines: 1 }
-      Text { text: hero.clock; style: small; color: muted; maxLines: 1 }
-      if hero.live {
-        Spacer { height: 4 }
-        Button { text: hero.host == "" ? "watch" : "watch on ${hero.host}"; fill: width; onTap: url(hero.link) }
-      } else if hero.hint != "" {
-        Text { text: hero.hint; style: small; color: muted; maxLines: 1 }
+      if items.any(e => e.live) {
+        let on = items.find(e => e.live)
+        Text { text: on.host == "" ? "Watch the ${on.kind}" : "Watch the ${on.kind} on ${on.host}"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url(on.link) }
       }
-      Spacer { weight: 1 }
-      if len(upcoming) > 0 {
-        Rule { }
-        Spacer { height: 6 }
-        for e in upcoming key e.id {
-          Column {
-            gap: 0
-            padding: [0, 2]
-            Row {
-              align: center
-              Text { text: e.kind; style: label; color: muted; weight: 1; maxLines: 1 }
-              Text { text: e.when; style: small; color: e.urgency; width: 68; align: end; maxLines: 1 }
-            }
-            Text { text: e.kind == "return" ? "${e.title} · ${e.place}" : e.title; style: small; maxLines: 1 }
-          }
+      if hero != null {
+        Text { text: "Next up"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Item { label: "Mission"; value: hero.title }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "What"; value: hero.vehicle != "" ? "${hero.kind} · ${hero.vehicle}" : hero.kind }
+          Spacer { height: 1; fill: width; background: border; visible: hero.place != "" }
+          Item { label: "Where"; value: hero.place; visible: hero.place != "" }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "When"; value: hero.clock }
+          Spacer { height: 1; fill: width; background: border }
+          Item { label: "Status"; value: hero.status; tint: [hero.status].map(tone)[0] }
+          Spacer { height: 1; fill: width; background: border; visible: hero.hint != "" }
+          Item { label: "Webcast"; value: hero.hint; visible: hero.hint != "" }
         }
       }
+    }
+  }
+
+  component Schedule() {
+    Column {
+      gap: 12
+      visible: ready && hero != null
+      Text { text: "Coming up"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for e, i in items.drop(1).take(12) key e.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 8
+            padding: [20, 14]
+            Row {
+              gap: 16
+              align: center
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: e.kind == "return" ? "${e.title} · ${e.place}" : e.title; fontSize: 16; maxLines: 2 }
+                Text { text: e.feed != "" ? "${e.kind} · ${e.clock} · ${e.host} ${e.feed}" : "${e.kind} · ${e.clock}"; fontSize: 14; color: muted; maxLines: 2 }
+              }
+              Text { text: e.when; fontSize: 16; color: e.urgency; maxLines: 1 }
+            }
+            if e.live {
+              Text { text: e.host == "" ? "Watch" : "Watch on ${e.host}"; fontSize: 15; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 10]; onTap: url(e.link) }
+            }
+          }
+        }
+        if len(items) < 2 {
+          Text { text: "Nothing else scheduled."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
+      Text { text: "Precise times are local; dates without a time are UTC. From Launch Library."; fontSize: 14; color: muted }
     }
   }
 
@@ -277,40 +323,18 @@ widget "spacex" {
     title: "spacex"
     Column {
       scroll: true
-      gap: 0
-      Text { text: "launches, landings and returns"; style: label; color: muted }
-      Spacer { height: 8 }
-      if !ready {
-        Text { text: "…"; style: title }
-      } else if hero == null {
-        Text { text: notice != "" ? notice : "nothing scheduled"; color: muted }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Lead { weight: 1 }
+          Schedule { weight: 1 }
+        }
       } else {
-        if notice != "" {
-          Text { text: notice; style: small; color: yellow; maxLines: 1 }
-          Spacer { height: 8 }
-        }
-        if items.any(e => e.live) {
-          let on = items.find(e => e.live)
-          Button { text: on.host == "" ? "watch ${on.kind}" : "watch ${on.kind} on ${on.host}"; fill: width; onTap: url(on.link) }
-          Text { text: on.title; style: small; color: muted; maxLines: 1 }
-          Spacer { height: 8 }
-        }
-        for e, i in items.take(12) key e.id {
-          if i > 0 { Rule { } }
-          Activity {
-            kind: e.kind
-            title: e.title
-            when: e.when
-            detail: e.detail
-            clock: e.feed != "" ? "${e.clock} · ${e.host} ${e.feed}" : e.clock
-            live: e.live
-            link: e.link
-            host: e.host
-            tint: e.urgency
-          }
-        }
-        Spacer { height: 12 }
-        Text { text: "precise times are local · dates without a clock are utc · launch library"; style: small; color: muted; maxLines: 2 }
+        Lead { }
+        Schedule { }
       }
     }
   }

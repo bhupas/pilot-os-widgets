@@ -3,7 +3,7 @@ widget "what's new" {
   order: 9
   size: 3x2
   minSize: 2x2
-  meta { description: "What's new in the launcher, from its changelog on GitHub. Tap it for every release"; version: "1.0"; license: "MIT"; category: "news"; owl: 5 }
+  meta { description: "What's new in the launcher, from its changelog on GitHub. Tap it for every release"; version: "1.1"; license: "MIT"; category: "news"; owl: 8 }
 
   source log = http("https://raw.githubusercontent.com/SimonSchubert/omalauncher/main/CHANGELOG.md") every 6h timeout 10s status
   source sys = android.system every 1h
@@ -21,58 +21,87 @@ widget "what's new" {
 
   onTap: screen()
 
+  // The tile: the newest version big, its date (or that an update is out), then its changes as fit.
   Column {
     gap: 2
-    Text { text: "what's new"; style: muted }
+    fill: true
+    Row {
+      align: center
+      Text { text: "WHAT'S NEW"; style: label; color: muted; weight: 1; maxLines: 1 }
+    }
     if latest != null {
-      Row {
-        gap: 6
-        align: bottom
-        Text { text: latest.version; style: title; color: accent; width: 76; maxLines: 1 }
-        Text { text: behind ? "update" : latest.date; style: small; color: behind ? yellow : muted; align: end; weight: 1; maxLines: 1 }
+      Text { text: latest.version; fontSize: 40; color: accent; maxLines: 1 }
+      Text { text: behind ? "Update available" : latest.date; style: small; color: behind ? yellow : muted; maxLines: 1 }
+      for item in latest.items.take(max((rows ?? 2) * 3 - 6, 0)) {
+        Text { text: "• ${item}"; style: small; maxLines: 1 }
       }
-      // Every change, cut off with "…" where the tile ends.
-      Text { text: join(latest.items.map(i => "• ${i}"), "\n"); style: small; maxLines: 40; weight: 1 }
     } else {
-      Text { text: log == null ? "…" : "offline"; style: title; color: muted }
+      Text { text: log == null ? "…" : "Offline"; fontSize: 40; color: muted; maxLines: 1 }
+      Text { text: log == null ? "Loading" : "GitHub can't be reached"; style: small; color: muted; maxLines: 1 }
+    }
+  }
+
+  // The app: the newest release big, then every release as a card of its changes.
+  let wide = (screenWidth ?? 0) > 600
+
+  component Release(r) {
+    let installed = r.version == sys.launcher
+    Column {
+      gap: 12
+      Row {
+        gap: 8
+        align: center
+        padding: [4, 8, 0, 0]
+        Text { text: r.date == null ? "Coming next" : r.version; fontSize: 14; bold: true; color: r.date == null ? muted : accent; weight: 1; maxLines: 1 }
+        if installed {
+          Text { text: "Installed"; fontSize: 12; bold: true; color: green; maxLines: 1; background: mix(surface, green, 0.22); radius: 12; padding: [10, 4] }
+        }
+        Text { text: r.date ?? ""; fontSize: 14; color: muted; maxLines: 1 }
+      }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for item, i in r.items {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            padding: [20, 14]
+            Text { text: item; fontSize: 16; color: r.date == null ? muted : foreground; weight: 1 }
+          }
+        }
+      }
     }
   }
 
   screen {
     title: "what's new"
-    if len(releases) == 0 {
-      Text { text: log == null ? "loading…" : "couldn't reach github"; style: body; color: muted }
-    } else {
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
       Column {
-        scroll: true
-        gap: 18
-        for r in releases key r.version {
-          let installed = r.version == sys.launcher
-          Column {
-            gap: 6
-            Row {
-              gap: 8
-              align: bottom
-              Text { text: r.date == null ? "coming next" : r.version; style: title; color: r.date == null ? muted : accent; weight: 1; maxLines: 1 }
-              if installed {
-                Text { text: "installed"; style: label; color: green; width: 72; align: end }
-              }
-              Text { text: r.date ?? ""; style: small; color: muted; width: 88; align: end }
-            }
-            for item in r.items {
-              Row {
-                gap: 8
-                align: top
-                Text { text: "•"; style: body; color: r.date == null ? muted : accent; width: 10 }
-                Text { text: item; style: body; color: r.date == null ? muted : foreground; weight: 1 }
-              }
-            }
-          }
+        gap: 0
+        Text { text: latest != null ? latest.version : log == null ? "Loading…" : "Offline"; fontSize: 48; bold: true; maxLines: 1 }
+        Text {
+          text: latest == null ? (log == null ? "Reading the changelog" : "GitHub can't be reached") : behind ? "Released ${latest.date} · you have ${sys.launcher}" : "Released ${latest.date} · installed"
+          fontSize: 16; color: behind ? yellow : muted; maxLines: 1
         }
+      }
+      if wide {
         Row {
-          justify: end
-          Button { text: "open on github ↗"; color: muted; onTap: url("https://github.com/SimonSchubert/omalauncher/blob/main/CHANGELOG.md") }
+          gap: 12
+          align: top
+          Column { gap: 12; weight: 1; for r, k in releases key r.version { if k % 2 == 0 { Release { r: r } } } }
+          Column { gap: 12; weight: 1; for r, k in releases key r.version { if k % 2 == 1 { Release { r: r } } } }
         }
+      } else {
+        for r in releases key r.version { Release { r: r } }
+      }
+      Row {
+        gap: 8
+        Spacer { weight: 1 }
+        Text { text: "Open on GitHub"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: url("https://github.com/SimonSchubert/omalauncher/blob/main/CHANGELOG.md") }
       }
     }
   }

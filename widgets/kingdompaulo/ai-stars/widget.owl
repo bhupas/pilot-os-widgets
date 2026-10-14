@@ -1,7 +1,7 @@
 widget "ai stars" {
   size: 3x5
   minSize: 3x3
-  meta { description: "The AI repos gaining GitHub stars fastest: stars per hour or day, % growth and acceleration, with a full ranking, language filter, search, pins and #1 alerts."; version: "3.0"; license: "MIT"; category: "dev"; owl: 5 }
+  meta { description: "The AI repos gaining GitHub stars fastest: stars per hour or day, % growth and acceleration, with a full ranking, language filter, search, pins and #1 alerts."; version: "3.1"; license: "MIT"; category: "dev"; owl: 8 }
 
   requires { pacman: ["curl", "jq", "util-linux"] }
 
@@ -117,7 +117,10 @@ widget "ai stars" {
   let ranked = scored.filter(s => s.v != null).sortBy(s => -s.v) + scored.filter(s => s.v == null)
   let filtered = ranked.filter(s => (lang == "" || s.r.lang == lang) && (query == "" || contains(lower(s.r.name + " " + s.r.desc), lower(query))))
   let favourites = scored.filter(s => indexOf(bookmarks, s.r.name) >= 0).sortBy(s => indexOf(bookmarks, s.r.name) ?? 0)
-  let shown = clamp((rows ?? 5) + 1, 3, 9)
+  // Ranked repos that fit under the total, two lines each: one at 3 rows, five at 5.
+  let shown = max(floor(((rows ?? 5) * 64 - 130) / 34), 1)
+  let perDay = "+" + ((data.total24h ?? 0) >= 1000 ? fixed(data.total24h / 1000, 1) + "k" : str(data.total24h ?? 0))
+  let wide = (screenWidth ?? 0) > 600
   let leader = (data.warming ?? true) ? null : (first(items) ?? {}).name
   let age = data.updated == null ? 0 : (now ?? data.updated) - data.updated
   let note = data.error != null ? data.error : age > 1800 ? "updated ${fmtDuration(age)} ago" : data.warming ? "warming up · ${fmtDuration(data.span ?? 0)} of history" : null
@@ -144,51 +147,46 @@ widget "ai stars" {
     let r = s.r
     let marked = indexOf(bookmarks, r.name) >= 0
     let at = indexOf(bookmarks, r.name) ?? 0
+    let young = r.age != null && r.age < 45
     Row {
-      gap: 8
+      gap: 12
       align: center
-      padding: [4, 6]
-      radius: 6
-      background: marked ? alpha(accent, 0.08) : null
+      padding: [16, 12, 8, 12]
       onTap: url(r.url)
-      Text { text: rank; style: label; color: rank == "1" || rank == "2" || rank == "3" ? accent : muted; width: 22; align: end; maxLines: 1 }
+      Text { text: rank; fontSize: 14; bold: rank == "1" || rank == "2" || rank == "3"; color: rank == "1" || rank == "2" || rank == "3" || rank == "★" ? accent : muted; width: 24; align: end; maxLines: 1 }
       Column {
         gap: 1
         weight: 1
-        Row {
-          gap: 6
-          align: center
-          Text { text: last(split(r.name, "/")); style: body; bold: true; maxLines: 1; weight: 1 }
-          if r.age != null && r.age < 45 { Text { text: "NEW"; fontSize: 9; bold: true; color: background; background: accent; padding: [5, 1]; radius: 4; width: 34; align: center; maxLines: 1 } }
-        }
-        Text { text: first(split(r.name, "/")) + (r.lang != "" ? " · " + r.lang : "") + (r.age != null && r.age < 45 ? " · ${r.age}d old" : ""); style: label; color: muted; maxLines: 1 }
-        if r.desc != "" { Text { text: r.desc; style: small; color: alpha(foreground, 0.75); maxLines: 1 } }
+        Text { text: last(split(r.name, "/")); fontSize: 16; bold: true; maxLines: 1 }
+        Text { text: (young ? "New · " : "") + first(split(r.name, "/")) + (r.lang != "" ? " · " + r.lang : "") + (young ? " · ${r.age}d old" : ""); fontSize: 13; color: young ? accent : muted; maxLines: 1 }
+        if r.desc != "" { Text { text: r.desc; fontSize: 13; color: muted; maxLines: 1 } }
       }
-      Sparkline { values: r.spark; color: (last(r.spark) ?? 0) > (first(r.spark) ?? 0) ? green : muted; min: min(r.spark); width: 48; height: 22 }
+      Sparkline { values: r.spark; color: (last(r.spark) ?? 0) > (first(r.spark) ?? 0) ? green : muted; min: min(r.spark); width: 44; height: 22 }
       Column {
         gap: 1
-        width: 62
+        width: 58
         Num { v: s.v; est: s.est; kind: metric }
-        Text { text: "★" + (r.stars >= 1000 ? fixed(r.stars / 1000, r.stars >= 100000 ? 0 : 1) + "k" : str(r.stars)); style: label; color: muted; align: end; maxLines: 1 }
+        Text { text: "★" + (r.stars >= 1000 ? fixed(r.stars / 1000, r.stars >= 100000 ? 0 : 1) + "k" : str(r.stars)); fontSize: 12; color: muted; align: end; maxLines: 1 }
       }
       Text {
         text: marked ? "★" : "☆"
         fontSize: 20
-        color: marked ? accent : alpha(muted, 0.8)
-        width: 32
+        color: marked ? accent : muted
+        width: 36
         align: center
-        padding: [0, 6]
+        padding: [0, 8]
         onTap: bookmarks = marked ? bookmarks.take(at) + bookmarks.drop(at + 1) : bookmarks + [r.name]
       }
     }
   }
 
   Column {
-    gap: 6
+    gap: 2
+    fill: true
     Row {
       align: center
       gap: 6
-      Text { text: "★ AI STARS"; style: label; bold: true; color: accent; weight: 1; maxLines: 1 }
+      Text { text: "AI STARS"; style: label; color: muted; weight: 1; maxLines: 1 }
       // Tap to step through the windows without opening the screen.
       Text {
         text: metric == "trend" ? "TREND" : (metric == "pct" ? "%" : "+") + upper(winLabel)
@@ -204,180 +202,224 @@ widget "ai stars" {
         onTap: win = win == 24 ? 1 : win == 1 ? 6 : 24
       }
     }
-    if data == null {
-      Text { text: "fetching GitHub…"; style: small; color: muted; weight: 1 }
-    } else if len(ranked) == 0 {
-      Text { text: data.error ?? "no repos yet"; style: small; color: muted; weight: 1 }
-    } else {
+    // Stars a day across every tracked repo, then the ranking under it.
+    Text { text: data == null ? null : perDay; fontSize: 40; color: green; maxLines: 1 }
+    Text {
+      text: data == null ? "Fetching GitHub…" : note ?? "stars a day · ${data.tracked} repos"
+      style: small
+      color: data.error != null ? red : note != null ? accent : muted
+      maxLines: 1
+    }
+    Spacer { weight: 1 }
+    if data != null && len(ranked) == 0 {
+      Text { text: data.error ?? "No repos yet"; style: small; color: muted; maxLines: 2 }
+    }
+    for s, i in take(ranked, shown) key s.r.name {
+      let marked = indexOf(bookmarks, s.r.name) >= 0
+      Row {
+        gap: 8
+        align: center
+        Text { text: "${i + 1}"; style: label; bold: i == 0; color: i == 0 ? accent : muted; width: 12; align: center; maxLines: 1 }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: (marked ? "★ " : "") + last(split(s.r.name, "/")); fontSize: 15; color: marked ? accent : foreground; maxLines: 1 }
+          Text { text: (s.r.age != null && s.r.age < 45 ? "new · " : "") + "★" + (s.r.stars >= 1000 ? fixed(s.r.stars / 1000, s.r.stars >= 100000 ? 0 : 1) + "k" : str(s.r.stars)) + (s.r.lang != "" ? " · " + s.r.lang : ""); style: label; color: s.r.age != null && s.r.age < 45 ? accent : muted; maxLines: 1 }
+        }
+        if (cols ?? 3) >= 4 { Sparkline { values: s.r.spark; min: min(s.r.spark); color: (last(s.r.spark) ?? 0) > (first(s.r.spark) ?? 0) ? green : muted; width: 44; height: 18 } }
+        Num { v: s.v; est: s.est; kind: metric; size: 12; width: 54 }
+      }
+    }
+  }
+
+  // What to rank by, over which window, in which language, and the search.
+  component Filters() {
+    Column {
+      gap: 12
+      Input { text: query; placeholder: "Search name or description"; onChange: query = value; fill: width; background: surface; radius: 28; padding: [20, 14] }
+      Text { text: "Rank by"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
       Column {
-        gap: 4
-        weight: 1
-        justify: spaceBetween
-        for s, i in take(ranked, shown) key s.r.name {
-          let marked = indexOf(bookmarks, s.r.name) >= 0
+        gap: 12
+        background: surface
+        radius: 28
+        padding: 12
+        Row {
+          gap: 4
+          for o in [["abs", "Stars"], ["pct", "Percent"], ["trend", "Trend"]] {
+            Text { text: o[1]; fontSize: 14; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: metric == o[0] ? mix(surface, accent, 0.22) : transparent; color: metric == o[0] ? foreground : muted; onTap: metric = o[0] }
+          }
+        }
+        if metric != "trend" {
           Row {
-            gap: 8
-            align: center
-            Text { text: "${i + 1}"; style: label; bold: i == 0; color: i == 0 ? accent : muted; width: 12; align: center; maxLines: 1 }
-            Column {
-              gap: 0
-              weight: 1
-              Text { text: (marked ? "★ " : "") + last(split(s.r.name, "/")); style: body; color: marked ? accent : foreground; maxLines: 1 }
-              Text { text: (s.r.age != null && s.r.age < 45 ? "new · " : "") + "★" + (s.r.stars >= 1000 ? fixed(s.r.stars / 1000, s.r.stars >= 100000 ? 0 : 1) + "k" : str(s.r.stars)) + (s.r.lang != "" ? " · " + s.r.lang : ""); style: label; color: s.r.age != null && s.r.age < 45 ? accent : muted; maxLines: 1 }
+            gap: 4
+            for o in [[1, "1 hour"], [6, "6 hours"], [24, "24 hours"]] {
+              Text { text: o[1]; fontSize: 14; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: win == o[0] ? mix(surface, accent, 0.22) : transparent; color: win == o[0] ? foreground : muted; onTap: win = o[0] }
             }
-            if (cols ?? 3) >= 4 { Sparkline { values: s.r.spark; min: min(s.r.spark); color: (last(s.r.spark) ?? 0) > (first(s.r.spark) ?? 0) ? green : muted; width: 44; height: 18 } }
-            Num { v: s.v; est: s.est; kind: metric; size: 12; width: 54 }
+          }
+        }
+        Flow {
+          gap: 8
+          Text { text: "All"; fontSize: 14; maxLines: 1; radius: 16; padding: [14, 8]; border: lang == "" ? 0 : 1; borderColor: border; background: lang == "" ? mix(surface, accent, 0.22) : transparent; onTap: lang = "" }
+          for l in data.langs ?? [] key l.lang {
+            Text { text: "${l.lang} ${l.count}"; fontSize: 14; maxLines: 1; radius: 16; padding: [14, 8]; border: lang == l.lang ? 0 : 1; borderColor: border; background: lang == l.lang ? mix(surface, accent, 0.22) : transparent; onTap: lang = lang == l.lang ? "" : l.lang }
           }
         }
       }
-      Text {
-        text: note ?? "+" + ((data.total24h ?? 0) >= 1000 ? fixed(data.total24h / 1000, 1) + "k" : str(data.total24h)) + " ★/day · ${data.tracked} repos"
-        style: label
-        color: data.error != null ? red : note != null ? accent : muted
-        maxLines: 1
+
+      // Stars gained per hour across every tracked repo, one bar per sample.
+      if len(data.perHour ?? []) > 1 {
+        Row {
+          align: center
+          padding: [4, 8, 0, 0]
+          Text { text: "Stars per hour, all repos"; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+          Text { text: "now ${last(data.perHour)[1]}"; fontSize: 14; color: green; width: 90; align: end; maxLines: 1 }
+        }
+        Column {
+          background: surface
+          radius: 28
+          padding: [20, 16]
+          Canvas {
+            height: 110
+            fill: width
+            let pts = data.perHour
+            let hi = max(max(pts.map(p => p[1])), 1)
+            let bw = width / len(pts)
+            for p, i in pts {
+              rect(i * bw + 1, 96 - max(p[1], 0) / hi * 88, max(bw - 2, 1), max(max(p[1], 0) / hi * 88, 1), fill: i == len(pts) - 1 ? green : alpha(green, 0.45), radius: 1)
+            }
+            line(0, 96.5, width, 96.5, stroke: alpha(muted, 0.4), width: 1)
+            text("${hi}/h", 0, 4, size: 10, color: muted)
+            text(fmtTime(first(pts)[0], "HH:mm"), 0, 105, size: 10, color: muted)
+            text("now", width, 105, size: 10, align: end, color: muted)
+          }
+        }
+      }
+    }
+  }
+
+  component About() {
+    Column {
+      gap: 12
+      // How the numbers are made, and the alerts.
+      Text { text: "About"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: alerts = !alerts
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Alert on a new #1"; fontSize: 16; maxLines: 1 }
+            Text { text: "A notification when another repo gains the most"; fontSize: 14; color: muted; maxLines: 2 }
+          }
+          // A switch, as Google's settings draw one.
+          Box {
+            width: 52; height: 32; radius: 16; background: alerts ? accent : transparent; border: alerts ? 0 : 2; borderColor: muted
+            Spacer { size: alerts ? 24 : 16; radius: alerts ? 12 : 8; background: alerts ? background : muted; offset: [alerts ? 24 : 8, alerts ? 4 : 8] }
+          }
+        }
+        Spacer { height: 1; fill: width; background: border }
+        Text {
+          text: "Samples the most-starred AI repos on GitHub every few minutes while this page is open, and measures growth between samples. \"~\" marks a projection until a full window has been seen."
+          fontSize: 14; color: muted; padding: [20, 14]
+        }
+        Spacer { height: 1; fill: width; background: border }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          Text { text: "Updated ${fmtTime(data.updated, "HH:mm")}"; fontSize: 16; weight: 1; maxLines: 1 }
+          Text { text: "Refresh"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 10]; onTap: refresh() }
+        }
+      }
+    }
+  }
+
+  // The pins, then the full ranking.
+  component Lists() {
+    Column {
+      gap: 12
+      if len(favourites) > 0 && query == "" && lang == "" {
+        Text { text: "Pinned"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for s, i in take(favourites, 12) key s.r.name {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+            Repo { s: s; rank: "★" }
+          }
+        }
+      }
+      Row {
+        align: center
+        gap: 8
+        padding: [4, 8, 0, 0]
+        Text { text: "Ranking"; fontSize: 14; bold: true; color: accent; maxLines: 1 }
+        Text {
+          text: (metric == "trend" ? "speeding up most, stars/hour" : metric == "pct" ? "biggest ${winLabel} gain, % of stars" : "most stars in ${winLabel}") + (lang != "" ? " · " + lang : "")
+          fontSize: 14
+          color: muted
+          weight: 1
+          align: end
+          maxLines: 1
+        }
+      }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        if len(filtered) == 0 {
+          Text { text: "Nothing matches."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+        for s, i in take(filtered, 50) key s.r.name {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Repo { s: s; rank: "${indexOf(ranked, s) + 1}" }
+        }
       }
     }
   }
 
   screen {
-    title: "AI STARS"
+    title: "AI stars"
     Column {
       scroll: true
-      gap: 14
+      gap: 12
+      padding: [0, 4, 0, 24]
       if data == null {
-        Text { text: "fetching GitHub…"; style: body; color: muted }
+        Text { text: "Fetching GitHub…"; fontSize: 16; color: muted }
       } else {
-        // What to rank by, over which window, and which repos.
+        // Stars a day across the tracked repos, big.
         Column {
-          gap: 10
-          fill: width
-          background: alpha(muted, 0.1)
-          padding: [12, 12]
-          radius: 8
-          Row {
-            gap: 6
-            align: center
-            Text { text: "rank"; style: label; color: muted; width: 52; maxLines: 1 }
-            Text { text: "stars"; style: small; color: (metric == "abs") ? background : foreground; background: (metric == "abs") ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: metric = "abs" }
-            Text { text: "percent"; style: small; color: (metric == "pct") ? background : foreground; background: (metric == "pct") ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: metric = "pct" }
-            Text { text: "trend"; style: small; color: (metric == "trend") ? background : foreground; background: (metric == "trend") ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: metric = "trend" }
-          }
-          if metric != "trend" {
-            Row {
-              gap: 6
-              align: center
-              Text { text: "window"; style: label; color: muted; width: 52; maxLines: 1 }
-              Text { text: "1 hour"; style: small; color: (win == 1) ? background : foreground; background: (win == 1) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: win = 1 }
-              Text { text: "6 hours"; style: small; color: (win == 6) ? background : foreground; background: (win == 6) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: win = 6 }
-              Text { text: "24 hours"; style: small; color: (win == 24) ? background : foreground; background: (win == 24) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: win = 24 }
-            }
-          }
-          Flow {
-            gap: 6
-            Text { text: "all"; style: small; color: (lang == "") ? background : foreground; background: (lang == "") ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; width: 56; align: center; maxLines: 1; onTap: lang = "" }
-            for l in data.langs ?? [] key l.lang {
-              Text { text: "${l.lang} ${l.count}"; style: small; color: (lang == l.lang) ? background : foreground; background: (lang == l.lang) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; width: (len(l.lang) + len(str(l.count)) + 1) * 7.4 + 26; maxLines: 1; onTap: lang = lang == l.lang ? "" : l.lang }
-            }
-          }
-          Input { text: query; placeholder: "search name or description"; onChange: query = value; fill: width }
+          gap: 0
+          Text { text: "${perDay} ★"; fontSize: 48; bold: true; color: green; maxLines: 1 }
+          Text { text: "a day, ${data.warming ? "projected" : "last 24h"} · ${data.tracked} repos · ${fmtDuration(data.span ?? 0)} of history"; fontSize: 16; color: muted; maxLines: 2 }
+          if note != null { Text { text: note; fontSize: 14; color: data.error != null ? red : accent; maxLines: 2 } }
         }
-
-        // The tracked universe at a glance.
-        Row {
-          gap: 8
-          for st in [
-            ["repos", "${data.tracked}", "tracked"],
-            ["★ / day", ((data.total24h ?? 0) >= 1000 ? fixed(data.total24h / 1000, 1) + "k" : str(data.total24h)), data.warming ? "projected" : "last 24h"],
-            ["history", fmtDuration(data.span ?? 0), "snapshots"]
-          ] key st[0] {
+        if wide {
+          Row {
+            gap: 24
+            align: top
             Column {
-              gap: 2
+              gap: 12
               weight: 1
-              padding: [10, 8]
-              radius: 8
-              background: alpha(muted, 0.08)
-              Text { text: st[0]; style: label; color: muted; maxLines: 1 }
-              Text { text: st[1]; style: title; color: st[0] == "★ / day" ? green : foreground; maxLines: 1 }
-              Text { text: st[2]; fontSize: 11; color: muted; maxLines: 1 }
+              Filters { }
+              About { }
             }
+            Lists { weight: 1 }
           }
-        }
-
-        // Stars gained per hour across every tracked repo, one bar per sample.
-        if len(data.perHour ?? []) > 1 {
-          Column {
-            gap: 6
-            Row {
-              Text { text: "STARS PER HOUR, ALL REPOS"; style: label; color: accent; bold: true; weight: 1; maxLines: 1 }
-              Text { text: "now ${last(data.perHour)[1]}"; style: label; color: green; width: 90; align: end; maxLines: 1 }
-            }
-            Canvas {
-              height: 110
-              fill: width
-              let pts = data.perHour
-              let hi = max(max(pts.map(p => p[1])), 1)
-              let bw = width / len(pts)
-              for p, i in pts {
-                rect(i * bw + 1, 96 - max(p[1], 0) / hi * 88, max(bw - 2, 1), max(max(p[1], 0) / hi * 88, 1), fill: i == len(pts) - 1 ? green : alpha(green, 0.45), radius: 1)
-              }
-              line(0, 96.5, width, 96.5, stroke: alpha(muted, 0.4), width: 1)
-              text("${hi}/h", 0, 4, size: 10, color: muted)
-              text(fmtTime(first(pts)[0], "HH:mm"), 0, 105, size: 10, color: muted)
-              text("now", width, 105, size: 10, align: end, color: muted)
-            }
-          }
-        }
-
-        if len(favourites) > 0 && query == "" && lang == "" {
-          Column {
-            gap: 2
-            Text { text: "★ PINNED"; style: label; color: accent; bold: true }
-            for s in take(favourites, 12) key s.r.name {
-              Repo { s: s; rank: "★" }
-            }
-          }
-        }
-
-        Column {
-          gap: 2
-          Row {
-            align: end
-            Text { text: "RANKING"; style: label; color: accent; bold: true; width: 72; maxLines: 1 }
-            Text {
-              text: (metric == "trend" ? "speeding up most, stars/hour" : metric == "pct" ? "biggest ${winLabel} gain, % of stars" : "most stars in ${winLabel}") + (lang != "" ? " · " + lang : "")
-              style: small
-              color: muted
-              weight: 1
-              align: end
-              maxLines: 1
-            }
-          }
-          if len(filtered) == 0 {
-            Text { text: "nothing matches"; style: small; color: muted; padding: [0, 8] }
-          }
-          for s, i in take(filtered, 50) key s.r.name {
-            Repo { s: s; rank: "${indexOf(ranked, s) + 1}" }
-          }
-        }
-
-        // How the numbers are made, and what's going on right now.
-        Column {
-          gap: 4
-          padding: [12, 10]
-          radius: 8
-          background: alpha(muted, 0.08)
-          if note != null { Text { text: note; style: small; color: data.error != null ? red : accent } }
-          Text {
-            text: "Samples the most-starred AI repos on GitHub every few minutes while this page is open, and measures growth between samples. \"~\" marks a projection until a full window has been seen."            style: small
-            color: muted
-          }
-          Text { text: "updated ${fmtTime(data.updated, "HH:mm")} · ${data.tracked} repos"; style: label; color: muted; maxLines: 1 }
-          Row {
-            gap: 8
-            align: center
-            Text { text: alerts ? "🔔 new #1 alerts on" : "🔕 alert on new #1"; style: small; color: (alerts) ? background : foreground; background: (alerts) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: alerts = !alerts }
-            Text { text: "↻ refresh"; style: small; color: (false) ? background : foreground; background: (false) ? accent : alpha(muted, 0.15); padding: [10, 5]; radius: 12; weight: 1; align: center; maxLines: 1; onTap: refresh() }
-          }
+        } else {
+          Filters { }
+          Lists { }
+          About { }
         }
       }
     }

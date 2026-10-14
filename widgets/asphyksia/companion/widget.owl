@@ -3,9 +3,9 @@ widget "companion" {
   minSize: 2x2
 
   meta {
-    owl: 5
+    owl: 9
     description: "An agent core with its own genome: a derived seed shapes its form and colour, use bends it, and rare rolls give aurora, eclipse or a one-in-4096 shiny."
-    version: "2.0"
+    version: "2.1"
     license: "MIT"
     category: "dev"
   }
@@ -326,23 +326,174 @@ widget "companion" {
     }
   }
 
+  // The screen's forms: "name" for the sigil, "adopt" for a species code; "" for none.
+  state sheet = ""
+  state draft = ""
+  // Each mode's colour in the theme, for text and bars (the core keeps its own).
+  let tones = {bash: green, read: blue, edit: yellow, write: orange, web: cyan, think: magenta, error: red}
+  let tone = get(tones, activity, accent)
+  let wide = (screenWidth ?? 0) > 600
+
   onTap: screen()
 
+  // The tile: what it's doing, the core, and the detail.
   Column {
     gap: 2
+    fill: true
+    Row {
+      align: center
+      Text { text: upper(activity); style: label; color: activity == "idle" ? muted : tone; weight: 1; maxLines: 1 }
+      if badge != "" {
+        Text { text: badge; style: small; color: shiny ? hsl((now * 40) % 360, 0.9, 0.7, 1) : accent; width: 16; align: end; maxLines: 1 }
+      }
+    }
     Box { weight: 1; fill: width; align: center
       Core { ener: energy; col: tint; coreSize: 96; act: activity; stage: stage; cur: curious; dna: dna }
     }
+    Text {
+      text: detail != "" ? detail : sigil != "" ? sigil : num(agents, 0) > 0 ? "${agents} agent${num(agents, 0) == 1 ? "" : "s"} online" : "Standing by"
+      style: small; color: muted; maxLines: 1
+    }
+  }
+
+  component Item(label, value) {
     Row {
-      gap: 6
+      gap: 16
       align: center
-      Text { text: activity == "idle" ? "idle" : activity; style: label; color: tint; width: 42 }
-      Text {
-        text: detail != "" ? detail : sigil != "" ? sigil : num(agents, 0) > 0 ? "${agents} agent${num(agents, 0) == 1 ? "" : "s"} online" : "standing by"
-        style: small; color: muted; weight: 1; maxLines: 1
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
+    }
+  }
+
+  component Heading(label) {
+    Text { text: label; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+  }
+
+  component Line() {
+    Spacer { height: 1; fill: width; background: border }
+  }
+
+  // Who it is: the core, its name and what it's doing, its species and mood.
+  component Being() {
+    Column {
+      gap: 12
+      Box { height: 260; fill: width; align: center
+        Core { ener: energy; col: tint; coreSize: 150; act: activity; stage: stage; cur: curious; dna: dna }
       }
-      if badge != "" {
-        Text { text: badge; style: small; color: shiny ? hsl((now * 40) % 360, 0.9, 0.7, 1) : accent; width: 16; align: end }
+      Column {
+        gap: 0
+        Text { text: sigil != "" ? sigil : activity == "idle" ? "Idle" : activity; fontSize: 48; bold: true; color: activity == "idle" ? foreground : tone; maxLines: 2 }
+        Text { text: (detail != "" ? detail : "No current task") + (activity != "idle" ? " · ${fmtDuration(max(age, 0))}" : ""); fontSize: 16; color: muted; maxLines: 2 }
+      }
+      Heading { label: "Species" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: { draft = sigil; sheet = "name" }
+          Text { text: "Name"; fontSize: 16; maxLines: 1 }
+          Text { text: sigil != "" ? sigil : "Not named"; fontSize: 16; color: sigil != "" ? accent : muted; align: end; weight: 1; maxLines: 1 }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+        Line { }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: copy(code)
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Code ${code}"; fontSize: 16; maxLines: 1 }
+            Text { text: "Tap to copy, to share this species"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+          Text { text: grade; fontSize: 16; color: shiny || epic || rare ? accent : muted; maxLines: 1 }
+        }
+        Line { }
+        Item { label: "Shape"; value: "arms ${arms} · sides ${sides2} · sats ${sats} · ring ${ringN}" }
+        Line { }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: { draft = ""; sheet = "adopt" }
+          Text { text: "Adopt a species"; fontSize: 16; weight: 1; maxLines: 1 }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Heading { label: "Mood" }
+      Row {
+        gap: 8
+        for m in ["calm", "focused", "curious", "wild"] {
+          Text { text: upper(sub(m, 0, 1)) + sub(m, 1, len(m)); fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: mood == m ? mix(surface, accent, 0.22) : surface; onTap: mood = m }
+        }
+      }
+    }
+  }
+
+  // How it grew and what it did: tool use, the log, modes to try, and how scripts drive it.
+  component History() {
+    Column {
+      gap: 12
+      Heading { label: "Evolution" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Item { label: "Stage"; value: stageNames[stage] }
+        Line { }
+        Item { label: "Interactions"; value: "${total}" }
+        Line { }
+        Item { label: "Alive"; value: born > 0 ? fmtDuration(max(now - born, 0)) : "Just born" }
+        Line { }
+        Column {
+          gap: 10
+          padding: [20, 14]
+          for t, i in tools key t {
+            Row {
+              gap: 12
+              align: center
+              Text { text: t; fontSize: 14; color: get(tones, t, accent); width: 48; maxLines: 1 }
+              Progress { value: countsMax > 0 ? counts[i] / countsMax * 100 : 0; color: get(tones, t, accent); weight: 1 }
+              Text { text: "${counts[i]}"; fontSize: 14; font: mono; color: muted; width: 40; align: end; maxLines: 1 }
+            }
+          }
+        }
+      }
+      Heading { label: "Activity log" }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        if len(log) == 0 {
+          Text { text: "Nothing yet. Start an agent or try a mode below."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+        for e, i in log key i {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 12
+            align: center
+            padding: [20, 12]
+            Text { text: fmtTime(e.t, "HH:mm:ss"); fontSize: 14; font: mono; color: muted; width: 72; maxLines: 1 }
+            Text { text: e.tool; fontSize: 14; bold: true; color: get(tones, e.tool, accent); width: 48; maxLines: 1 }
+            Text { text: e.detail ?? ""; fontSize: 14; weight: 1; maxLines: 1 }
+          }
+        }
+      }
+      Heading { label: "Try a mode" }
+      Flow {
+        gap: 8
+        for t in tools {
+          Text { text: t; fontSize: 15; color: get(tones, t, accent); maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 10]; onTap: { detail = "manual test"; activity = t } }
+        }
+        Text { text: "idle"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 10]; onTap: { detail = ""; activity = "idle" } }
+      }
+      Heading { label: "From scripts" }
+      Text {
+        text: "Any script can drive it, one state per call: owl-send <this widget file> set detail \"reading widget.owl\" then set activity bash; set sigil \"a name\" to name it; set mood calm|focused|curious|wild for its temper; or set genome <code> to adopt a species. It also lights up on its own while an agent (pi, claude, codex…) is running, and settles back to idle when it stops."
+        fontSize: 14; color: muted; background: surface; radius: 28; padding: [20, 16]
       }
     }
   }
@@ -351,92 +502,56 @@ widget "companion" {
     title: "companion"
     Column {
       scroll: true
-      gap: 10
-      padding: 12
-      Box { height: 260; fill: width; align: center
-        Core { ener: energy; col: tint; coreSize: 150; act: activity; stage: stage; cur: curious; dna: dna }
-      }
-      Row {
-        gap: 8
-        align: center
-        Text { text: sigil != "" ? sigil : activity; style: huge; color: tint; weight: 1 }
-        if activity != "idle" {
-          Text { text: fmtDuration(max(age, 0)); style: title; color: muted; width: 80; align: end }
-        }
-      }
-      Text { text: detail != "" ? detail : "no current task"; style: body; color: muted }
-
-      Text { text: "species ${code} — ${grade}"; style: muted }
-      Row {
-        gap: 8
-        align: center
-        Button { text: "copy code"; onTap: copy(code) }
-        Text { text: "arms ${arms} · sides ${sides2} · sats ${sats} · ring ${ringN}"; style: small; color: muted; weight: 1 }
-      }
-
-      Text { text: "sigil"; style: muted }
-      Input { placeholder: sigil != "" ? sigil : "name your companion"; onSubmit: sigil = value }
-
-      Text { text: "mood — ${mood}"; style: muted }
-      Flow {
-        gap: 6
-        Button { text: "calm"; color: mood == "calm" ? accent : muted; onTap: mood = "calm" }
-        Button { text: "focused"; color: mood == "focused" ? accent : muted; onTap: mood = "focused" }
-        Button { text: "curious"; color: mood == "curious" ? accent : muted; onTap: mood = "curious" }
-        Button { text: "wild"; color: mood == "wild" ? accent : muted; onTap: mood = "wild" }
-      }
-
-      Text { text: "adopt a species — paste a code"; style: muted }
-      Input { placeholder: "species code"; onSubmit: genome = value == "" ? genome : num(value, genome) }
-
-      Text { text: "evolution — ${stageNames[stage]}"; style: muted }
-      Row {
-        gap: 8
-        align: center
-        Text { text: "${total} interactions"; style: small; color: foreground; width: 110 }
-        Text { text: born > 0 ? "alive ${fmtDuration(max(now - born, 0))}" : "just born"; style: small; color: muted; weight: 1; align: end }
-      }
-      for t, i in tools key t {
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
         Row {
-          gap: 8
-          align: center
-          Text { text: t; style: label; color: t == "bash" ? "#4ade80" : t == "read" ? "#60a5fa" : t == "edit" ? "#facc15" : t == "web" ? "#22d3ee" : "#c084fc"; width: 44 }
-          Progress { value: countsMax > 0 ? counts[i] / countsMax * 100 : 0; color: t == "bash" ? "#4ade80" : t == "read" ? "#60a5fa" : t == "edit" ? "#facc15" : t == "web" ? "#22d3ee" : "#c084fc"; weight: 1 }
-          Text { text: "${counts[i]}"; style: small; font: mono; color: muted; width: 36; align: end }
+          gap: 24
+          Being { weight: 1 }
+          History { weight: 1 }
         }
+      } else {
+        Being { }
+        History { }
       }
+    }
 
-      Text { text: "activity log"; style: muted }
-      if len(log) == 0 {
-        Text { text: "nothing yet — start an agent or poke a mode below"; style: small; color: muted }
-      }
-      for e, i in log key i {
-        Row {
-          gap: 8
-          align: center
-          Text { text: fmtTime(e.t, "HH:mm:ss"); style: small; font: mono; color: muted; width: 64 }
-          Text { text: e.tool; style: label; color: e.tool == "bash" ? "#4ade80" : e.tool == "read" ? "#60a5fa" : e.tool == "edit" ? "#facc15" : e.tool == "write" ? "#fb923c" : e.tool == "web" ? "#22d3ee" : e.tool == "think" ? "#c084fc" : e.tool == "error" ? "#f87171" : accent; width: 52 }
-          Text { text: e.detail ?? ""; style: small; color: foreground; weight: 1; maxLines: 1 }
-        }
-      }
-
-      Text { text: "try a mode"; style: muted }
-      Flow {
-        gap: 6
-        for t in tools {
-          Button {
-            text: t
-            color: t == "bash" ? "#4ade80" : t == "read" ? "#60a5fa" : t == "edit" ? "#facc15" : t == "web" ? "#22d3ee" : "#c084fc"
-            onTap: { detail = "manual test"; activity = t }
+    // Naming it, or adopting another companion's species by its code.
+    if sheet != "" {
+      Sheet {
+        title: sheet == "name" ? "Name your companion" : "Adopt a species"
+        onDismiss: sheet = ""
+        Column {
+          gap: 16
+          padding: [0, 4, 0, 4]
+          if sheet == "name" {
+            Input { text: draft; placeholder: "A name"; focus: sheet == "name"; onChange: draft = value; onSubmit: { sigil = value; sheet = "" } }
+          } else {
+            Input { text: draft; placeholder: "Species code"; keyboard: "number"; focus: sheet == "adopt"; onChange: draft = value; onSubmit: { genome = value == "" ? genome : num(value, genome); sheet = "" } }
+            Text { text: "Its shape and colours change to that species. A shiny stays with the companion it was born to."; fontSize: 14; color: muted }
+          }
+          Row {
+            gap: 8
+            align: center
+            if sheet == "name" && sigil != "" {
+              Text { text: "Remove"; fontSize: 15; color: red; maxLines: 1; padding: [8, 12]; onTap: { sigil = ""; sheet = "" } }
+            }
+            Spacer { weight: 1 }
+            Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: sheet = "" }
+            Text {
+              text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+              onTap: {
+                if sheet == "name" {
+                  sigil = draft
+                } else {
+                  genome = draft == "" ? genome : num(draft, genome)
+                }
+                sheet = ""
+              }
+            }
           }
         }
-        Button { text: "idle"; color: muted; onTap: { detail = ""; activity = "idle" } }
       }
-      Text {
-        text: "any script can drive it, one state per call: owl-send <this widget file> set detail \"reading widget.owl\" then set activity bash; set sigil \"a name\" to name it; set mood calm|focused|curious|wild for its temper; or set genome <code> to adopt a species. It also lights up on its own while an agent (pi, claude, codex…) is running, and settles back to idle when it stops."
-        style: small; color: muted
-      }
-      Button { text: "close"; onTap: close() }
     }
   }
 }

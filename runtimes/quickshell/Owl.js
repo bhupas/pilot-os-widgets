@@ -1161,6 +1161,23 @@ function groups(m) {
 var weekStart = 1
 function setWeekStart(day) { weekStart = day }
 
+// java's week of the week-based year: weeks start on weekStart, and week 1 is the first with at least 4 days of the
+// year where they start on Monday (ISO), with any where they start on Sunday (the US), as java's locales count it.
+function weekOfYear(d) {
+  var minDays = weekStart === 1 ? 4 : 1
+  function first(year) {
+    var off = (new Date(year, 0, 1).getDay() - weekStart + 7) % 7
+    return new Date(year, 0, 1 - off + (7 - off >= minDays ? 0 : 7))
+  }
+  var day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  var start = first(d.getFullYear() + 1)
+  if (day < start) {
+    start = first(d.getFullYear())
+    if (day < start) start = first(d.getFullYear() - 1)
+  }
+  return Math.floor(Math.round((day - start) / 86400000) / 7) + 1
+}
+
 var DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
   "October", "November", "December"]
@@ -1207,7 +1224,8 @@ function fmtTime(seconds, pattern) {
     else if (c === "D") {
       var start = new Date(d.getFullYear(), 0, 1)
       out += zpad(Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - start) / 86400000) + 1, n)
-    } else if (c === "Q" || c === "q") out += String(Math.floor(d.getMonth() / 3) + 1)
+    } else if (c === "w") out += zpad(weekOfYear(d), n)
+    else if (c === "Q" || c === "q") out += String(Math.floor(d.getMonth() / 3) + 1)
     else if (c === "Z" || c === "x" || c === "X") {
       var off = -d.getTimezoneOffset()
       var sign = off < 0 ? "-" : "+"

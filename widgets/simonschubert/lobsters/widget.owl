@@ -1,5 +1,5 @@
 widget "lobsters" {
-  meta { description: "The hottest stories on Lobsters with score, comments and tags; tap a story to read it"; version: "1.1"; license: "MIT"; category: "news" }
+  meta { owl: 8; description: "The hottest stories on Lobsters with score, comments and tags; tap a story to read it"; version: "1.2"; license: "MIT"; category: "news" }
   size: 6x4
   minSize: 4x3
 
@@ -12,27 +12,102 @@ widget "lobsters" {
     }]'
   """) every 15m json timeout 15s
 
-  onTap: url("https://lobste.rs")
+  let stories = hot ?? []
+  let top = stories[0]
 
+  onTap: screen()
+
+  // The tile: the top story big, then as many more as fit, one line each.
   Column {
-    gap: 4
-    Text { text: "lobsters"; style: muted; color: red }
+    gap: 2
+    fill: true
+    Row {
+      align: center
+      Text { text: "LOBSTERS"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: "HOTTEST"; style: label; color: red; maxLines: 1 }
+    }
+    if hot == null {
+      Text { text: "Loading…"; fontSize: 18; bold: true; color: muted; maxLines: 1 }
+    } else if len(stories) == 0 {
+      Text { text: "No stories"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Lobsters can't be reached"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: top.title; fontSize: 18; bold: true; maxLines: 2 }
+      Text { text: "${top.score} points · ${top.comments} comments · ${top.tags}"; style: small; color: muted; maxLines: 1 }
+      Spacer { height: 6 }
+      for s in stories.drop(1).take(max((rows ?? 4) * 3 - 6, 1)) key s.id {
+        Row {
+          gap: 8
+          align: center
+          Text { text: s.title; style: small; weight: 1; maxLines: 1 }
+          Text { text: "${s.score}"; style: small; color: muted; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  // The app: every story in a card; a tap on one opens it, a tap on its comments the discussion.
+  let wide = (screenWidth ?? 0) > 600
+
+  component Card(list, from) {
     Column {
-      scroll: true
-      weight: 1
-      gap: 6
-      for s in hot key s.id {
-        Column {
-          gap: 0
-          onTap: url(s.url)
-          Text { text: s.title; fontSize: 13; maxLines: 2 }
-          Row {
-            gap: 6
-            Text { text: "${s.score} pts"; fontSize: 10; color: muted; width: 48 }
-            Text { text: "${s.comments} comments"; fontSize: 10; color: muted; width: 88; onTap: url(s.discussion) }
-            Text { text: s.tags; fontSize: 10; color: accent; maxLines: 1; weight: 1; align: end }
+      gap: 0
+      background: surface
+      radius: 28
+      clip: true
+      for s, i in list key s.id {
+        Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+        Row {
+          gap: 16
+          align: top
+          padding: [20, 14]
+          Text { text: "${from + i + 1}"; fontSize: 16; color: muted; width: 24; maxLines: 1 }
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: s.title; fontSize: 16; maxLines: 3; onTap: url(s.url) }
+            Row {
+              gap: 12
+              align: center
+              Text { text: "${s.score} points"; fontSize: 14; color: muted; maxLines: 1; onTap: url(s.url) }
+              Text { text: "${s.comments} comments"; fontSize: 14; color: accent; maxLines: 1; onTap: url(s.discussion) }
+              Text { text: s.tags; fontSize: 14; color: red; align: end; weight: 1; maxLines: 1 }
+            }
           }
         }
+      }
+    }
+  }
+
+  screen {
+    title: "lobsters"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: hot == null ? "Loading…" : "${len(stories)} stories"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: hot == null ? "From lobste.rs" : len(stories) == 0 ? "Lobsters can't be reached" : "The hottest on lobste.rs right now"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if len(stories) > 0 {
+        Text { text: "Hottest"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        if wide {
+          Row {
+            gap: 12
+            align: top
+            Card { list: stories.take(ceil(len(stories) / 2)); from: 0; weight: 1 }
+            Card { list: stories.drop(ceil(len(stories) / 2)); from: ceil(len(stories) / 2); weight: 1 }
+          }
+        } else {
+          Card { list: stories; from: 0 }
+        }
+      }
+      Row {
+        gap: 8
+        Spacer { weight: 1 }
+        Text { text: "Refresh"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: refresh() }
+        Text { text: "Open lobste.rs"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: url("https://lobste.rs") }
       }
     }
   }

@@ -1,8 +1,8 @@
 widget "vcard" {
   meta {
-    owl: 6
+    owl: 9
     description: "Your contact details as a QR code, to share on the fly. Tap for a full-screen code, or edit the details in place."
-    version: "1.1"
+    version: "1.2"
     license: "MIT"
     category: "productivity"
   }
@@ -24,6 +24,13 @@ widget "vcard" {
   state sSite = "" persist
   // Not persisted: the screen should open on the code, not the form.
   state editing = false
+  // The form's fields as typed, kept apart until Save so Cancel changes nothing.
+  state dName = ""
+  state dOrg = ""
+  state dRole = ""
+  state dTel = ""
+  state dMail = ""
+  state dSite = ""
 
   // A newline would split a vCard line, so flatten it. Apostrophes stay: the
   // card goes into the command as sh(vcard), one quoted word whatever it holds.
@@ -71,72 +78,150 @@ widget "vcard" {
   // sh(vcard) makes the card one quoted word, apostrophes and all.
   source qr = cmd("printf %s ${sh(vcard)} | qrencode -t ASCII -l M -m 4 -o - | awk \"{o=\\\"\\\"; for(i=1;i<=length(\\\$0);i+=2){c=substr(\\\$0,i,1); o=o (c==\\\"#\\\" ? \\\"d\\\" : \\\".\\\")} print o}\"") every 1h
 
-  let rows = lines(qr)
+  // The code's rows (not `rows`, which is the tile's height in cells).
+  let code = lines(qr)
+  // What's under the name: the organisation and role, else how to reach them.
+  let subParts = [name != "" && org != "" ? org : "", role].filter(t => t != "")
+  let subline = len(subParts) > 0 ? join(subParts, " · ") : tel != "" && tel != label ? tel : mail != "" && mail != label ? mail : ""
+  let small = (rows ?? 3) < 3 || (cols ?? 3) < 3
+  let wide = (screenWidth ?? 0) > 600
 
-  // Nothing entered yet: go straight to the editor, otherwise show the code.
-  onTap: { editing = !filled; screen() }
+  // Nothing entered yet: go straight to the form, otherwise show the code.
+  onTap: {
+    dName = sName; dOrg = sOrg; dRole = sRole; dTel = sTel; dMail = sMail; dSite = sSite
+    editing = !filled
+    screen()
+  }
 
-  Column { gap: 2; fill: true; align: center; justify: center
-    Text {
-      text: filled ? (name != "" ? name : label) : "vCard"
-      style: title
+  Column {
+    gap: 2
+    fill: true
+    if !small { Text { text: "CONTACT"; style: label; color: muted; maxLines: 1 } }
+    Text { text: filled ? label : "Your card"; fontSize: small ? 22 : 28; bold: true; maxLines: 1 }
+    Text { text: filled ? subline : "No details yet"; style: small; color: muted; maxLines: 1; visible: !filled || subline != "" }
+    Spacer { weight: 1 }
+    Text { text: filled ? "Tap to share" : "Tap to add yours"; style: small; color: accent; maxLines: 1 }
+  }
+
+  // The code, black on white whatever the theme: a scanner needs the contrast.
+  component Code() {
+    Box {
+      fill: width
       align: center
-      maxLines: 3
+      Canvas {
+        size: min((screenWidth ?? 360) - 48, 380)
+        let n = count(code)
+        let p = max(1, floor(min(width, height) / n))
+        rect(0, 0, width, height, fill: "#ffffff", radius: 10)
+        sprite(code, (width - n * p) / 2, (height - n * p) / 2, p, palette: {d: "#000000"})
+      }
     }
-    Text {
-      text: filled ? "tap to share" : "tap to add your details"
-      style: muted
-      fontSize: 11
+  }
+
+  component Item(title, value) {
+    Row {
+      gap: 16
       align: center
+      padding: [20, 14]
+      Text { text: title; fontSize: 16; color: muted; maxLines: 1 }
+      Text { text: value == "" ? "Not set" : value; fontSize: 16; color: value == "" ? muted : foreground; weight: 1; align: end; maxLines: 1 }
+    }
+  }
+
+  // The details on a card; a tap opens them in the form.
+  component Details() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: label; fontSize: 32; bold: true; maxLines: 2 }
+        Text { text: subline; fontSize: 16; color: muted; maxLines: 1; visible: subline != "" }
+      }
+      Text { text: "Details"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        onTap: { dName = sName; dOrg = sOrg; dRole = sRole; dTel = sTel; dMail = sMail; dSite = sSite; editing = true }
+        Item { title: "Name"; value: name }
+        Spacer { height: 1; fill: width; background: border }
+        Item { title: "Organisation"; value: org }
+        Spacer { height: 1; fill: width; background: border }
+        Item { title: "Job title"; value: role }
+        Spacer { height: 1; fill: width; background: border }
+        Item { title: "Phone"; value: tel }
+        Spacer { height: 1; fill: width; background: border }
+        Item { title: "Email"; value: mail }
+        Spacer { height: 1; fill: width; background: border }
+        Item { title: "Website"; value: site }
+      }
+      Row {
+        gap: 12
+        Spacer { weight: 1 }
+        Text { text: "Edit"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 12]; onTap: { dName = sName; dOrg = sOrg; dRole = sRole; dTel = sTel; dMail = sMail; dSite = sSite; editing = true } }
+        // Paste this into any chat app to send the contact itself.
+        Text { text: "Copy vCard"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: copy(vcard) }
+      }
     }
   }
 
   screen {
     title: "my contact"
-    Column { scroll: true; gap: 10; align: center
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
       if !filled {
-        Text { text: "No details yet"; style: title }
-        Text {
-          text: "Fill in the form below and the code appears here."
-          style: small
-          color: muted
-          align: center
+        Column {
+          gap: 0
+          Text { text: "No details yet"; fontSize: 48; bold: true; maxLines: 2 }
+          Text { text: "Add them and your code appears here, ready to scan."; fontSize: 16; color: muted }
+        }
+        Text { text: "Add your details"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: editing = true }
+      } else if wide {
+        Row {
+          gap: 24
+          Code { weight: 1 }
+          Details { weight: 1 }
         }
       } else {
-        // Black on white whatever the theme: a scanner needs the contrast.
-        Canvas { size: min(screenWidth - 48, 380)
-          let n = count(rows)
-          let p = max(1, floor(min(width, height) / n))
-          rect(0, 0, width, height, fill: "#ffffff", radius: 10)
-          sprite(rows, (width - n * p) / 2, (height - n * p) / 2, p, palette: {d: "#000000"})
-        }
-
-        Text { text: label; style: title; align: center }
-        if name != "" && org != "" { Text { text: org; style: body; color: muted; align: center } }
-        if role != "" { Text { text: role; style: small; color: muted; align: center } }
-        if tel != "" { Text { text: tel; style: body; align: center } }
-        if mail != "" { Text { text: mail; style: body; color: muted; align: center } }
-        if site != "" { Text { text: site; style: small; color: muted; align: center } }
+        Code { }
+        Details { }
       }
+    }
 
-      if !editing {
-        Row { gap: 8
-          Button { text: "edit"; onTap: editing = true }
-          // Paste this into any chat app to send the contact itself.
-          Button { text: "copy vCard"; onTap: copy(vcard) }
-        }
-      } else {
-        Text { text: "your details"; style: label; color: muted; align: start }
-        Input { text: sName; placeholder: "name"; onChange: sName = value }
-        Input { text: sOrg; placeholder: "organisation"; onChange: sOrg = value }
-        Input { text: sRole; placeholder: "job title"; onChange: sRole = value }
-        Input { text: sTel; placeholder: "phone"; onChange: sTel = value }
-        Input { text: sMail; placeholder: "email"; onChange: sMail = value }
-        Input { text: sSite; placeholder: "website"; onChange: sSite = value }
-        Row { gap: 8
-          // Re-encodes now rather than waiting for the next interval.
-          Button { text: "done"; onTap: { editing = false; refresh() } }
-          Button { text: "copy vCard"; onTap: copy(vcard) }
+    // The form, as Google's apps open one: over the screen, saved or left as it was.
+    if editing {
+      Sheet {
+        title: filled ? "Edit contact" : "Your details"
+        onDismiss: editing = false
+        Column {
+          gap: 12
+          padding: [0, 4, 0, 4]
+          Input { text: dName; placeholder: "Name"; focus: editing; onChange: dName = value }
+          Input { text: dOrg; placeholder: "Organisation"; onChange: dOrg = value }
+          Input { text: dRole; placeholder: "Job title"; onChange: dRole = value }
+          Input { text: dTel; placeholder: "Phone"; onChange: dTel = value }
+          Input { text: dMail; placeholder: "Email"; onChange: dMail = value }
+          Input { text: dSite; placeholder: "Website"; onChange: dSite = value }
+          Row {
+            gap: 8
+            align: center
+            if filled {
+              Text {
+                text: "Clear"; fontSize: 15; color: red; padding: [8, 12]
+                onTap: { sName = ""; sOrg = ""; sRole = ""; sTel = ""; sMail = ""; sSite = ""; editing = false }
+              }
+            }
+            Spacer { weight: 1 }
+            Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = false }
+            // Re-encodes now rather than waiting for the next interval.
+            Text {
+              text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+              onTap: { sName = dName; sOrg = dOrg; sRole = dRole; sTel = dTel; sMail = dMail; sSite = dSite; editing = false; refresh() }
+            }
+          }
         }
       }
     }

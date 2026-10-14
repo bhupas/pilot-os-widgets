@@ -1,5 +1,5 @@
 widget "xkcd" {
-  meta { description: "The latest xkcd comic with its title and alt text; tap to open it"; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "The latest xkcd comic with its title and alt text; tap it for the comic full screen"; version: "1.2"; license: "MIT"; category: "fun" }
   size: 6x5
   minSize: 3x3
 
@@ -16,15 +16,67 @@ widget "xkcd" {
     jq -c --arg path "$c/$num.png" '{num, title: .safe_title, alt, path: $path}' <<< "$info"
   """) every 1h json timeout 40s
 
-  onTap: url("https://xkcd.com/${comic.num}")
+  let wide = (screenWidth ?? 0) > 600
 
+  onTap: screen()
+
+  // The tile: the comic's title, the comic, and its alt text when there's room.
   Column {
-    gap: 4
+    gap: 2
+    fill: true
     Row {
-      Text { text: comic.title; style: body; bold: true; maxLines: 1; weight: 1 }
-      Text { text: "#${comic.num}"; style: muted; width: 56; align: end }
+      align: center
+      Text { text: "XKCD"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: comic == null ? "" : "#${comic.num}"; style: label; color: accent; maxLines: 1; width: 64; align: end }
     }
+    Text { text: comic.title; fontSize: 18; bold: true; maxLines: 1 }
+    Spacer { height: 4 }
     if comic.path != null { Image { src: comic.path; fit: contain; fill: width; weight: 1 } }
-    Text { text: comic.alt; style: small; color: muted; maxLines: 3 }
+    Text { text: comic.alt; style: small; color: muted; maxLines: (rows ?? 5) >= 5 ? 3 : 1; visible: (rows ?? 5) >= 4 }
+  }
+
+  component Comic() {
+    Box {
+      fill: width; height: wide ? (screenHeight ?? 600) - 120 : min((screenWidth ?? 360) * 1.1, 520)
+      background: surface; radius: 28; clip: true; padding: 12; align: center
+      if comic.path != null { Image { src: comic.path; fit: contain; fill: true } }
+    }
+  }
+
+  component About() {
+    Column {
+      gap: 12
+      Text { text: "Alt text"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Text { text: comic.alt; fontSize: 16; background: surface; radius: 28; padding: [20, 16] }
+      Row {
+        gap: 12
+        Text { text: "Open on xkcd.com"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://xkcd.com/${comic.num}") }
+        Text { text: "Explain"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: url("https://www.explainxkcd.com/wiki/index.php/${comic.num}") }
+      }
+    }
+  }
+
+  screen {
+    title: "xkcd"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: comic == null ? "Loading…" : comic.title; fontSize: 48; bold: true; maxLines: 2 }
+        Text { text: comic == null ? "Fetching the latest comic" : "Comic #${comic.num} · the latest one"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if wide {
+        Row {
+          gap: 24
+          Comic { weight: 1 }
+          About { weight: 1 }
+        }
+      } else {
+        Comic { }
+        About { }
+      }
+    }
   }
 }

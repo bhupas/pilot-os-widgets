@@ -1,5 +1,5 @@
 widget "feeds" {
-  meta { description: "The newest posts from the RSS and Atom feeds listed in ~/.config/omarchy-proot/feeds, starting with Arch Linux news"; version: "1.1"; license: "MIT"; category: "news" }
+  meta { description: "The newest posts from the RSS and Atom feeds listed in ~/.config/omarchy-proot/feeds, starting with Arch Linux news"; version: "1.2"; license: "MIT"; category: "news"; owl: 8 }
   size: 6x4
   minSize: 4x3
 
@@ -63,33 +63,147 @@ print(json.dumps(posts[:40]))
 '
   """) every 30m json timeout 30s
   source now = clock every 60s
+  // The feed the screen is narrowed to, by its title; empty shows them all.
+  state only = ""
 
+  let posts = items ?? []
+  let feeds = unique(posts.map(p => p.feed).filter(f => f != ""))
+  let today = count(posts, p => p.at > 0 && now - p.at < 86400)
+  let top = first(posts)
+  // How long ago, short: 5m, 3h, 2d.
+  let dated = posts.map(p => {title: p.title, url: p.url, feed: p.feed, at: p.at,
+    age: p.at == 0 ? "" : now - p.at < 3600 ? "${max(floor((now - p.at) / 60), 1)}m" : now - p.at < 86400 ? "${floor((now - p.at) / 3600)}h" : "${floor((now - p.at) / 86400)}d"})
+  let ageOf = top == null ? "" : dated[0].age
+  let shown = only == "" ? dated : dated.filter(p => p.feed == only)
+
+  onTap: screen()
+
+  // The newest post big, then as many more as fit: none at 3 rows, two per row after that.
   Column {
-    gap: 4
+    gap: 2
+    fill: true
     Row {
-      onTap: terminal('$EDITOR ~/.config/omarchy-proot/feeds', "feeds")
-      Text { text: "feeds"; style: muted; weight: 1 }
-      Text { text: "edit"; fontSize: 11; color: muted; width: 40; align: end }
+      align: center
+      Text { text: "FEEDS"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: ageOf == "" ? "" : "${upper(ageOf)} AGO"; style: label; color: accent; maxLines: 1; visible: ageOf != "" }
     }
-    if items != null && len(items) == 0 { Text { text: "nothing loaded: tap edit to check the feed list"; style: small } }
+    if items == null {
+      Text { text: "Loading…"; fontSize: 18; bold: true; maxLines: 1 }
+    } else if len(posts) == 0 {
+      Text { text: "Nothing loaded"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Tap to check the feed list"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: top.title; fontSize: 18; bold: true; maxLines: 2 }
+      Text { text: top.feed; style: small; color: muted; maxLines: 1 }
+      Spacer { weight: 1 }
+      for p in posts.drop(1).take(max((rows ?? 4) * 2 - 5, 0)) key p.url {
+        Row {
+          gap: 8
+          Text { text: p.title; style: small; maxLines: 1; weight: 1 }
+          Text { text: p.feed; style: small; color: muted; maxLines: 1; width: 96; align: end; visible: (cols ?? 6) >= 5 }
+        }
+      }
+    }
+  }
+
+  component Latest() {
     Column {
-      scroll: true
-      weight: 1
-      gap: 6
-      for p in items key p.url {
-        let age = now - p.at
-        Column {
-          gap: 0
-          onTap: url(p.url)
-          Text { text: p.title; fontSize: 13; maxLines: 2 }
-          Row {
-            Text { text: p.feed; fontSize: 10; color: accent; maxLines: 1; weight: 1 }
+      gap: 12
+      // Narrow to one feed, as a row of chips; the picked one tonal.
+      if len(feeds) > 1 {
+        Flow {
+          gap: 8
+          for f in [""] + feeds {
             Text {
-              text: p.at == 0 ? "" : age < 3600 ? "${max(floor(age / 60), 1)}m" : age < 86400 ? "${floor(age / 3600)}h" : "${floor(age / 86400)}d"
-              fontSize: 10; color: muted; width: 40; align: end
+              text: f == "" ? "All" : f
+              fontSize: 14; maxLines: 1; radius: 20; padding: [16, 8]
+              background: only == f ? mix(surface, accent, 0.22) : transparent
+              border: only == f ? 0 : 1; borderColor: border
+              onTap: only = f
             }
           }
         }
+      }
+      Text { text: only == "" ? "Latest" : only; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0]; maxLines: 1 }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for p, i in shown key p.url {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 2
+            padding: [20, 14]
+            onTap: url(p.url)
+            Text { text: p.title; fontSize: 16; maxLines: 3 }
+            Row {
+              gap: 8
+              Text { text: p.feed; fontSize: 14; color: accent; maxLines: 1; weight: 1 }
+              Text { text: p.age; fontSize: 14; color: muted; maxLines: 1 }
+            }
+          }
+        }
+        if len(shown) == 0 { Text { text: items == null ? "Loading…" : "Nothing loaded. Check the feed list below."; fontSize: 16; color: muted; padding: [20, 16] } }
+      }
+    }
+  }
+
+  component Settings() {
+    Column {
+      gap: 12
+      Text { text: "Feeds"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: terminal('$EDITOR ~/.config/omarchy-proot/feeds', "feeds")
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Edit the feed list"; fontSize: 16; maxLines: 1 }
+            Text { text: "One RSS or Atom address per line, in ~/.config/omarchy-proot/feeds"; fontSize: 14; color: muted; maxLines: 2 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+        Spacer { height: 1; fill: width; background: border }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: refresh()
+          Text { text: "Check for new posts"; fontSize: 16; maxLines: 1; weight: 1 }
+          Text { text: "Every 30 min"; fontSize: 14; color: muted; maxLines: 1 }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "feeds"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: items == null ? "…" : "${today} new"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: "in the last day, from ${len(feeds)} feed${len(feeds) == 1 ? "" : "s"}"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if (screenWidth ?? 0) > 600 {
+        Row {
+          gap: 16
+          Latest { weight: 2 }
+          Settings { weight: 1 }
+        }
+      } else {
+        Latest { }
+        Settings { }
       }
     }
   }

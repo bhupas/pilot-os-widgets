@@ -1,5 +1,5 @@
 widget "2048" {
-  meta { owl: 6; description: "The 2048 puzzle: swipe the board, or tap one of its edges, to slide the tiles; equal ones merge. The game and your best score are kept"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "The 2048 puzzle: swipe the board, or tap one of its edges, to slide the tiles; equal ones merge. The game and your best score are kept"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 4x4
   minSize: 3x3
   padding: 10
@@ -36,8 +36,10 @@ widget "2048" {
   let n = 4
   let gap = 5
   let cell = max(floor((min((tileWidth ?? 300) - 20, (tileHeight ?? 320) - 52) - (n + 1) * gap) / n), 12)
-  let step = cell + gap
-  let gridPx = n * step + gap
+  let gridPx = n * (cell + gap) + gap
+  // The board on the full screen: as wide as the screen allows, below the score.
+  let bigCell = max(floor((min((screenWidth ?? 360) - 16, (screenHeight ?? 640) - 200, 520) - (n + 1) * gap) / n), 12)
+  let bigPx = n * (bigCell + gap) + gap
   let top = max(board)
   let stuck = all(range(16), k => get(board, k, 0) > 0 && (k % 4 == 3 || get(board, k, 0) != get(board, k + 1, 0)) && (k >= 12 || get(board, k, 0) != get(board, k + 4, 0)))
   let sizes = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
@@ -83,44 +85,15 @@ widget "2048" {
     armed = 0
   }
 
-  Column {
-    gap: 6
-    fill: true
-    align: center
-    justify: center
-    Row {
-      width: gridPx
-      align: center
-      gap: 6
-      Text { text: "2048"; bold: true; width: 44; maxLines: 1; color: top >= 2048 ? green : foreground }
-      Text {
-        text: cols != null && cols < 4 ? "${score}" : best > score ? "${score} · best ${best}" : "${score}"
-        style: small; color: muted; weight: 1; align: end; maxLines: 1
-      }
-      Text {
-        text: now < armed ? "sure?" : "new"
-        fontSize: 12
-        align: center
-        maxLines: 1
-        width: 44
-        padding: [0, 3]
-        radius: 3 * corners
-        background: now < armed ? red : stuck ? accent : surface
-        color: now < armed || stuck ? background : foreground
-        onTap: {
-          reset = stuck || score == 0 || now < armed ? reset + 1 : reset
-          armed = stuck || score == 0 || now < armed ? 0 : now + 4
-        }
-      }
-    }
-
+  // The board, cs dp a cell and gp dp across; it takes the swipes and taps that move the tiles.
+  component Board(cs, gp) {
     Canvas {
-      width: gridPx
-      height: gridPx
+      width: gp
+      height: gp
 
       // A tap on an edge of the board slides the tiles to it.
       onTap: {
-        dir = abs(x - gridPx / 2) > abs(y - gridPx / 2) ? (x > gridPx / 2 ? "right" : "left") : (y > gridPx / 2 ? "down" : "up")
+        dir = abs(x - gp / 2) > abs(y - gp / 2) ? (x > gp / 2 ? "right" : "left") : (y > gp / 2 ? "down" : "up")
         moveAt = time
         moveNow = now
         tick = tick + 1
@@ -142,16 +115,17 @@ widget "2048" {
       // restarts with the frame clock.
       let since = now - moveNow < 3 && time >= moveAt ? time - moveAt : 1000
       // the tiles arrive from where they came, the new one grows, merged ones bump
-      let glide = (1 - clamp(since / 0.1, 0, 1)) * cell * 0.3
+      let glide = (1 - clamp(since / 0.1, 0, 1)) * cs * 0.3
       let ox = slid == "left" ? glide : slid == "right" ? -glide : 0
       let oy = slid == "up" ? glide : slid == "down" ? -glide : 0
       let grow = clamp((since - 0.08) / 0.14, 0, 1)
       let bump = since > 0.06 && since < 0.26 ? 1 + 0.14 * sin((since - 0.06) / 0.2 * pi) : 1
-      let rad = cell * 0.16 * corners
+      let step = cs + gap
+      let rad = cs * 0.16 * corners
 
-      rect(0, 0, gridPx, gridPx, radius: rad * 1.4, fill: alpha(surface, 0.6))
+      rect(0, 0, gp, gp, radius: rad * 1.4, fill: alpha(surface, 0.6))
       for i in range(16) {
-        rect(gap + (i % 4) * step, gap + floor(i / 4) * step, cell, cell, radius: rad, fill: mix(surface, background, 0.5))
+        rect(gap + (i % 4) * step, gap + floor(i / 4) * step, cs, cs, radius: rad, fill: mix(surface, background, 0.5))
       }
       for i in range(16) {
         let v = get(board, i, 0)
@@ -162,22 +136,99 @@ widget "2048" {
           let s = i == spot ? grow : get(pulse, i, 0) == 1 ? bump : 1
           let c = lv < 0 ? accent : get(tints, lv)
           translate(i == spot ? 0 : ox, i == spot ? 0 : oy) {
-            scale(s, s, x + cell / 2, y + cell / 2) {
-              rect(x, y, cell, cell, radius: rad, fill: c)
-              text("${v}", x + cell / 2, y + cell / 2, bold: true, align: center,
-                size: cell * (v < 100 ? 0.44 : v < 1000 ? 0.36 : v < 10000 ? 0.29 : 0.23),
+            scale(s, s, x + cs / 2, y + cs / 2) {
+              rect(x, y, cs, cs, radius: rad, fill: c)
+              text("${v}", x + cs / 2, y + cs / 2, bold: true, align: center,
+                size: cs * (v < 100 ? 0.44 : v < 1000 ? 0.36 : v < 10000 ? 0.29 : 0.23),
                 color: lv == 0 || lv == 1 ? foreground : background)
             }
           }
         }
       }
       if stuck {
-        rect(0, 0, gridPx, gridPx, radius: rad * 1.4, fill: alpha(background, 0.6))
-        rect(gridPx / 2 - 66, gridPx / 2 - 28, 132, 56, radius: 8 * corners, fill: background)
-        rect(gridPx / 2 - 66, gridPx / 2 - 28, 132, 56, radius: 8 * corners, stroke: border, width: 1)
-        text("game over", gridPx / 2, gridPx / 2 - 9, size: 17, bold: true, align: center, color: foreground)
-        text("${score} points", gridPx / 2, gridPx / 2 + 11, size: 12, align: center, color: muted)
+        rect(0, 0, gp, gp, radius: rad * 1.4, fill: alpha(background, 0.6))
+        rect(gp / 2 - 66, gp / 2 - 28, 132, 56, radius: 8 * corners, fill: background)
+        rect(gp / 2 - 66, gp / 2 - 28, 132, 56, radius: 8 * corners, stroke: border, width: 1)
+        text("game over", gp / 2, gp / 2 - 9, size: 17, bold: true, align: center, color: foreground)
+        text("${score} points", gp / 2, gp / 2 + 11, size: 12, align: center, color: muted)
       }
+    }
+  }
+
+  onTap: screen()
+
+  Column {
+    gap: 6
+    fill: true
+    align: center
+    justify: center
+    Row {
+      width: gridPx
+      align: center
+      gap: 6
+      Text { text: "2048"; style: label; width: 44; maxLines: 1; color: top >= 2048 ? green : muted }
+      Text {
+        text: cols != null && cols < 4 ? "${score}" : best > score ? "${score} · best ${best}" : "${score}"
+        style: small; color: muted; weight: 1; align: end; maxLines: 1
+      }
+      Text {
+        text: now < armed ? "Sure?" : "New"
+        fontSize: 12
+        align: center
+        maxLines: 1
+        width: 44
+        padding: [0, 3]
+        radius: 3 * corners
+        background: now < armed ? red : stuck ? accent : surface
+        color: now < armed || stuck ? background : foreground
+        onTap: {
+          reset = stuck || score == 0 || now < armed ? reset + 1 : reset
+          armed = stuck || score == 0 || now < armed ? 0 : now + 4
+        }
+      }
+    }
+
+    Board { cs: cell; gp: gridPx }
+  }
+
+  // The app: the score big, the board as large as the screen allows.
+  screen {
+    title: "2048"
+    Column {
+      gap: 16
+      fill: true
+      padding: [0, 4, 0, 24]
+      Row {
+        gap: 12
+        align: center
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: "${score}"; fontSize: 48; bold: true; maxLines: 1; color: top >= 2048 ? green : foreground }
+          Text { text: (stuck ? "Game over · best " : top >= 2048 ? "You made 2048 · best " : "Best ") + "${best}"; fontSize: 16; color: muted; maxLines: 1 }
+        }
+        // Asks once more before throwing away a game in progress.
+        Text {
+          text: now < armed ? "Sure?" : "New game"
+          fontSize: 16
+          bold: now < armed || stuck
+          maxLines: 1
+          radius: 24
+          padding: [20, 12]
+          background: now < armed ? red : stuck ? accent : mix(surface, accent, 0.22)
+          color: now < armed || stuck ? background : foreground
+          onTap: {
+            reset = stuck || score == 0 || now < armed ? reset + 1 : reset
+            armed = stuck || score == 0 || now < armed ? 0 : now + 4
+          }
+        }
+      }
+      Box {
+        fill: width
+        align: center
+        Board { cs: bigCell; gp: bigPx }
+      }
+      Text { text: "Swipe the board, or tap one of its edges, to slide the tiles."; fontSize: 14; color: muted; align: center; fill: width }
     }
   }
 }

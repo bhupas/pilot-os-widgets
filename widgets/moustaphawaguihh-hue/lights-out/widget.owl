@@ -1,5 +1,5 @@
 widget "lights out" {
-  meta { owl: 5; description: "The Lights Out puzzle. Tap a light to flip it and its neighbours until every light is off"; version: "1.0"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "The Lights Out puzzle. Tap a light to flip it and its neighbours until every light is off"; version: "1.1"; license: "MIT"; category: "fun" }
   size: 4x5
   minSize: 3x4
   padding: 10
@@ -24,10 +24,10 @@ widget "lights out" {
   let n = 5
   let gap = 4
   // One cell in dp, from whichever side of the tile is tighter; the height
-  // also leaves room for the status line and the buttons under the board.
+  // also leaves room for the label above the board and the buttons under it.
   let cell = max(floor((min((tileWidth ?? 300) - 28, (tileHeight ?? 360) - 90) - (n - 1) * gap) / n), 10)
-  let step = cell + gap
-  let gridPx = n * cell + (n - 1) * gap
+  // In the screen, as big as the width allows, up to a comfortable size.
+  let bigCell = max(floor((min((screenWidth ?? 360) - 40, 440) - (n - 1) * gap) / n), 24)
 
   let lit = sum(board)
   let solved = len(board) == n * n && lit == 0
@@ -38,9 +38,12 @@ widget "lights out" {
   let tapCells = range(n * n).filter(c => ((seed * 25 + c) * 7919 + pow(seed * 25 + c, 2) % 104729) % 1000 < 400)
   let fresh = range(n * n).map(j => sum(tapCells.map(c => (c == j || abs(c - j) == n || (abs(c - j) == 1 && floor(c / n) == floor(j / n))) ? 1 : 0)) % 2)
 
-  Column {
-    gap: 6
-    align: center
+  let status = solved ? "Solved in ${moves}" : "${moves} move${moves == 1 ? "" : "s"}${best > 0 ? " · best ${best}" : ""}"
+
+  // The board, at any cell size: the tile's and the screen's.
+  component Board(cell) {
+    let step = cell + gap
+    let gridPx = n * cell + (n - 1) * gap
     Canvas {
       width: gridPx
       height: gridPx
@@ -73,15 +76,29 @@ widget "lights out" {
         }
       }
     }
-    Text {
-      style: small
+  }
+
+  onTap: screen()
+
+  // The tile: what's lit over the board, the moves and the two buttons under it.
+  Column {
+    gap: 6
+    fill: true
+    Row {
       align: center
-      color: solved ? green : muted
-      text: solved ? "solved in ${moves}  ·  best ${best == 0 ? moves : best}" : "${lit} lit  ·  ${moves} moves${best > 0 ? "  ·  best ${best}" : ""}"
+      Text { text: "LIGHTS OUT"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: solved ? "SOLVED" : "${lit} LIT"; style: label; color: solved ? green : accent; maxLines: 1 }
+    }
+    Box {
+      weight: 1
+      fill: width
+      align: center
+      Board { cell: cell }
     }
     Row {
       gap: 6
-      justify: center
+      align: center
+      Text { text: status; style: small; color: solved ? green : muted; weight: 1; maxLines: 1 }
       Button {
         text: "undo"
         color: muted
@@ -92,6 +109,58 @@ widget "lights out" {
         }
       }
       Button { text: "new"; onTap: { board = fresh; history = []; moves = 0 } }
+    }
+  }
+
+  // The game, full screen: how many are lit, a big board, then the buttons and the rules.
+  screen {
+    title: "lights out"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: solved ? "Solved" : "${lit} lit"; fontSize: 48; bold: true; color: solved ? green : foreground; maxLines: 1 }
+        Text { text: solved ? "In ${moves} move${moves == 1 ? "" : "s"} · best ${best == 0 ? moves : best}" : status; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      Box {
+        fill: width
+        align: center
+        padding: [0, 8]
+        Board { cell: bigCell }
+      }
+      Row {
+        gap: 12
+        Spacer { weight: 1 }
+        Text {
+          text: "Undo"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 12]
+          opacity: len(history) > 0 ? 1 : 0.5
+          onTap: {
+            board = len(history) > 0 ? board.map((v, j) => j == last(history) || abs(j - last(history)) == n || (abs(j - last(history)) == 1 && floor(j / n) == floor(last(history) / n)) ? 1 - v : v) : board
+            moves = max(moves - 1, 0)
+            history = take(history, max(len(history) - 1, 0))
+          }
+        }
+        Text { text: "New game"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { board = fresh; history = []; moves = 0 } }
+        Spacer { weight: 1 }
+      }
+      Text { text: "How to play"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Text { text: "Tap a light to flip it and the four around it. Turn every light off to win, in as few moves as you can."; fontSize: 16; padding: [20, 14] }
+        Spacer { height: 1; fill: width; background: border }
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          Text { text: "Best"; fontSize: 16; weight: 1; maxLines: 1 }
+          Text { text: best == 0 ? "Not solved yet" : "${best} moves"; fontSize: 16; color: muted; maxLines: 1 }
+        }
+      }
     }
   }
 }

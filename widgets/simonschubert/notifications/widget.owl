@@ -2,19 +2,22 @@ widget "notifications" {
   size: 3x4
   minSize: 3x3
   requires { pacman: [] }
-  meta { description: "Your phone's notifications on the home screen, newest first, with a count per app. Tap one to open it, × to dismiss it; tap the tile for all of them by app"; version: "1.0"; license: "MIT"; category: "productivity"; owl: 5 }
+  meta { description: "Your phone's notifications on the home screen, newest first, with a count per app. Tap one to open it; tap the tile for all of them by app, to open or dismiss"; version: "1.1"; license: "MIT"; category: "productivity"; owl: 9 }
 
   // {available, count, items: [{key, app, package, title, text, time, clearable}]}, newest first,
   // without ongoing ones (music, downloads) and group headers. Needs notification access.
   source n = android.notifications
   source now = clock every 1m
 
+  // The notification open in the sheet, by key; "" for none.
+  state picked = ""
+
   let items = n.items ?? []
   let allowed = n == null || n.available != false
   let apps = items.map(i => i.app).unique().map(a => {app: a, count: count(items, i => i.app == a)})
-  // A row is ~46dp, the header and app chips ~56dp.
-  let visible = items.take(tileHeight == null ? 3 : clamp(floor((tileHeight - 64) / 46), 1, 12))
   let palette = [accent, blue, magenta, cyan, green, orange, yellow, red]
+  let sel = items.find(i => i.key == picked)
+  let wide = (screenWidth ?? 0) > 600
 
   onTap: screen()
 
@@ -28,76 +31,75 @@ widget "notifications" {
     }
   }
 
-  component Item(i, now, full = false) {
-    Row {
-      align: top
-      gap: 8
-      onTap: notification("open", i.key)
-      Dot { app: i.app }
+  // The tile: how many, from how many apps, then the newest as many as fit (one per 30 dp).
+  Column {
+    gap: 2
+    fill: true
+    Text { text: "NOTIFICATIONS"; style: label; color: muted; maxLines: 1 }
+    if !allowed {
+      Text { text: "Allow"; fontSize: 40; maxLines: 1 }
+      Text { text: "Tap to open the setting that shows them here"; style: small; color: muted; maxLines: 2; onTap: notification("open", "") }
+    } else {
+      Text { text: n == null ? "…" : len(items) == 0 ? "None" : "${n.count}"; fontSize: 40; color: len(items) > 0 ? accent : foreground; maxLines: 1 }
+      Text { text: len(items) == 0 ? "All caught up" : len(apps) == 1 ? "from ${apps[0].app}" : "from ${len(apps)} apps"; style: small; color: muted; maxLines: 1 }
+      Spacer { height: 6 }
       Column {
-        weight: 1
-        gap: 0
-        let age = now - i.time
-        Text { text: "${lower(i.app)} · ${age < 60 ? "now" : age < 3600 ? "${floor(age / 60)}m" : age < 86400 ? "${floor(age / 3600)}h" : "${floor(age / 86400)}d"}"; style: label; color: muted; maxLines: 1 }
-        if i.title != "" {
-          Text { text: i.title; style: small; bold: true; maxLines: 1 }
-        }
-        if i.text != "" {
-          Text { text: i.text; style: small; color: full ? foreground : muted; maxLines: full ? 4 : 1 }
-        }
-      }
-      if i.clearable == true {
-        Box {
-          size: 24
-          align: center
-          onTap: notification("dismiss", i.key)
-          Text { text: "󰅖"; font: icon; fontSize: 14; color: muted; align: center }
+        gap: 8
+        for i in items.take(max(floor(((tileHeight ?? 256) - 130) / 30), 0)) key i.key {
+          Row {
+            gap: 8
+            align: center
+            onTap: notification("open", i.key)
+            Dot { app: i.app; d: 20 }
+            Text { text: i.title != "" ? i.title : i.text; style: small; weight: 1; maxLines: 1 }
+          }
         }
       }
     }
   }
 
-  Column {
-    gap: 8
-    Row {
-      align: center
-      Text { text: "notifications"; style: muted; weight: 1 }
-      if len(items) > 0 {
-        Text { text: "${n.count}"; style: label; bold: true; color: accent; background: alpha(accent, 0.2); padding: [7, 1]; radius: 9; align: center; width: len("${n.count}") * 7 + 16 }
+  component Lead() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: !allowed ? "No access" : n == null ? "…" : len(items) == 0 ? "All caught up" : "${n.count}"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: !allowed ? "Allow notification access to see them here" : len(items) == 0 ? "No notifications" : "notification${n.count == 1 ? "" : "s"} from ${len(apps)} app${len(apps) == 1 ? "" : "s"}"; fontSize: 16; color: muted; maxLines: 2 }
+      }
+      if !allowed {
+        Text { text: "Allow access"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: notification("open", "") }
       }
     }
-    if !allowed {
-      Text { text: "Allow notification access to see them here. Tap to open the setting."; style: small; maxLines: 4; onTap: notification("open", "") }
-    } else {
-      if n == null {
-        Text { text: "loading…"; style: small; color: muted }
-      } else {
-        if len(items) == 0 {
-          Column {
-            weight: 1
-            align: center
-            justify: center
-            gap: 4
-            Text { text: "󰄬"; font: icon; fontSize: 28; color: green; align: center }
-            Text { text: "all caught up"; style: small; color: muted; align: center }
-          }
-        } else {
-          if len(apps) > 1 {
-            Flow {
-              gap: 4
-              for a in apps.take(4) key a.app {
-                Text { text: "${lower(a.app)} ${a.count}"; style: label; color: palette[len(a.app) % 8]; background: alpha(palette[len(a.app) % 8], 0.15); padding: [6, 1]; radius: 8; maxLines: 1; align: center; width: min(len("${lower(a.app)} ${a.count}") * 6.7 + 12, 150) }
+  }
+
+  // Every notification, by app, newest first; a tap opens it in a sheet.
+  component ByApp() {
+    Column {
+      gap: 12
+      for a in apps key a.app {
+        Text { text: "${a.app} · ${a.count}"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0]; maxLines: 1 }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for i, k in items.filter(x => x.app == a.app) key i.key {
+            let age = now - i.time
+            Spacer { height: 1; fill: width; background: border; visible: k > 0 }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              onTap: picked = i.key
+              Dot { app: i.app; d: 32 }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: i.title != "" ? i.title : i.app; fontSize: 16; maxLines: 1 }
+                Text { text: i.text; fontSize: 14; color: muted; maxLines: 2; visible: i.text != "" }
               }
+              Text { text: age < 60 ? "now" : age < 3600 ? "${floor(age / 60)}m" : age < 86400 ? "${floor(age / 3600)}h" : "${floor(age / 86400)}d"; fontSize: 14; color: muted; maxLines: 1 }
             }
-          }
-          Column {
-            gap: 10
-            for i in visible key i.key {
-              Item { i: i; now: now }
-            }
-          }
-          if len(items) > len(visible) {
-            Text { text: "+${len(items) - len(visible)} more"; style: label; color: muted }
           }
         }
       }
@@ -109,26 +111,46 @@ widget "notifications" {
     Column {
       scroll: true
       gap: 12
-      if len(items) == 0 {
-        Text { text: "all caught up"; style: body; color: muted }
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Lead { weight: 1 }
+          ByApp { weight: 1 }
+        }
+      } else {
+        Lead { }
+        ByApp { }
       }
-      for a in apps key a.app {
+    }
+
+    // One notification in full: open it as the shade would, or dismiss it.
+    if sel != null {
+      Sheet {
+        title: sel.app
+        onDismiss: picked = ""
         Column {
-          gap: 10
+          gap: 16
+          padding: [0, 4, 0, 4]
+          Column {
+            gap: 4
+            Text { text: sel.title; fontSize: 18; bold: true; visible: sel.title != "" }
+            Text { text: sel.text; fontSize: 16; visible: sel.text != "" }
+            Text { text: fmtTime(sel.time, "EEE d MMM · HH:mm"); fontSize: 14; color: muted; maxLines: 1 }
+          }
           Row {
-            align: center
             gap: 8
-            Dot { app: a.app; d: 26 }
-            Text { text: a.app; style: body; bold: true; weight: 1; maxLines: 1 }
-            Text { text: "${a.count}"; style: label; color: muted; width: 32; align: end }
+            align: center
+            if sel.clearable == true {
+              Text { text: "Dismiss"; fontSize: 15; color: red; padding: [8, 12]; maxLines: 1; onTap: { notification("dismiss", sel.key); picked = "" } }
+            }
+            Spacer { weight: 1 }
+            Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: picked = "" }
+            Text { text: "Open"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { notification("open", sel.key); picked = "" } }
           }
-          for i in items.filter(x => x.app == a.app) key i.key {
-            Item { i: i; now: now; full: true }
-          }
-          Spacer { height: 1; fill: width; background: alpha(muted, 0.2) }
         }
       }
-      Spacer { height: 12 }
     }
   }
 }

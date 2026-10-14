@@ -2,15 +2,20 @@ widget "google calendar" {
   size: 3x4
   minSize: 2x2
 
-  meta { owl: 6; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.0"; license: "MIT"; category: "productivity" }
+  meta { owl: 9; description: "Upcoming events from one or more Google calendars (or any iCal link). Tap for the full agenda and settings: add calendars, colors, days ahead"; version: "1.1"; license: "MIT"; category: "productivity" }
   requires { pacman: ["python", "python-icalendar", "python-recurring-ical-events"] }
 
   // Calendars are { name, url, color, on }, kept by the launcher, not in this file.
   state cals = [] persist
   state days = 14 persist
   state tab = "agenda"
+  // The calendar form: open, which calendar it changes (-1 adds one), and what's typed and picked in it.
+  state sheet = false
+  state editing = -1
   state newName = ""
   state newUrl = ""
+  state newColor = 0
+  state newOn = true
   state addErr = ""
 
   source now = clock every 1m
@@ -38,8 +43,8 @@ widget "google calendar" {
           path = os.path.join(cache, hashlib.sha1(url.encode()).hexdigest() + ".ics")
           try:
               req = urllib.request.Request(url, headers={"User-Agent": "omalauncher-calendar"})
-              data = urllib.request.urlopen(req, timeout=20).read(64 << 20 | 1)
-              if len(data) > 64 << 20: raise ValueError("feed over 64 MB")
+              data = urllib.request.urlopen(req, timeout=20).read(64 * 2 ** 20 | 1)
+              if len(data) > 64 * 2 ** 20: raise ValueError("feed over 64 MB")
               cal = icalendar.Calendar.from_ical(data)
               open(path, "wb").write(data)
           except Exception as e:
@@ -71,25 +76,25 @@ widget "google calendar" {
       out["events"].sort(key=lambda x: (x["d"], x["s"]))
       print(json.dumps(out, ensure_ascii=False))
     '
-  """ + " ${int(days)} ${sh(urlList)}") every 15m json timeout 60s status
+  """ + " ${sh(int(days))} ${sh(urlList)}") every 15m json timeout 60s status
 
   let data = ev.ok ? ev.out : null
   let dayKeys = range(days + 1).map(k => fmtTime(now + k * 86400, "yyyy-MM-dd"))
-  let dayLabels = range(len(dayKeys)).map(k => k == 0 ? "today" : k == 1 ? "tomorrow" : lower(fmtTime(now + k * 86400, "EEE d MMM")))
+  let dayLabels = range(len(dayKeys)).map(k => k == 0 ? "Today" : k == 1 ? "Tomorrow" : fmtTime(now + k * 86400, "EEEE d MMMM"))
+  let dayShort = range(len(dayKeys)).map(k => k == 0 ? "Today" : k == 1 ? "Tomorrow" : fmtTime(now + k * 86400, "EEE d MMM"))
   // Each calendar's shown name (yours, else the feed's own) and color.
-  let names = range(len(cals)).map(i => cals[i].name != "" ? cals[i].name : get(data.names ?? {}, str(i), "") != "" ? get(data.names, str(i)) : "calendar ${i + 1}")
+  let names = range(len(cals)).map(i => cals[i].name != "" ? cals[i].name : get(data.names ?? {}, str(i), "") != "" ? get(data.names, str(i)) : "Calendar ${i + 1}")
   let tints = cals.map(c => get(palette, c.color % len(palette), accent))
   let upcoming = (data.events ?? []).filter(e => indexOf(dayKeys, e.d) >= 0 && (e.a || e.e > now) && cals[e.c].on)
     .map(e => {t: e.t, l: e.l, c: e.c, d: e.d, a: e.a, s: e.s, e: e.e, n: e.n,
-      cal: names[e.c], tint: tints[e.c], when: e.a ? "all day" : e.s <= now ? "now" : fmtTime(e.s, "HH:mm")})
-  // Events with a day heading before the first event of each day.
-  let lines = flatten(range(len(upcoming)).map(i =>
-    i == 0 || upcoming[i].d != upcoming[i - 1].d ? [{h: true, d: upcoming[i].d, label: dayLabels[indexOf(dayKeys, upcoming[i].d)]}, upcoming[i]] : [upcoming[i]]))
-  // As many lines as the tile has room for, without a day heading left at the bottom.
-  let tileLines = lines.take(max(2, (rows ?? 4) * 3))
-  let tileFit = len(tileLines) > 0 && last(tileLines).h ? tileLines.take(len(tileLines) - 1) : tileLines
+      cal: names[e.c], tint: tints[e.c], when: e.a ? "All day" : e.s <= now ? "Now" : fmtTime(e.s, "HH:mm"),
+      // Short, for the tile: the weekday before the time when it isn't today.
+      tag: (e.d == dayKeys[0] ? "" : fmtTime(parseTime(e.d, "yyyy-MM-dd"), "EEE") + " ") + (e.a ? "all day" : e.s <= now ? "now" : fmtTime(e.s, "HH:mm"))})
+  // The days with events, in order, for the agenda's day cards.
+  let eventDays = unique(upcoming.map(e => e.d))
   let todayCount = count(upcoming, e => e.d == dayKeys[0])
   let errCount = len(keys(data.errors ?? {}))
+  let status = len(cals) == 0 ? "" : ev == null ? "…" : !ev.ok ? "ERROR" : errCount > 0 ? "!" : todayCount == 0 ? "FREE" : "${todayCount} TODAY"
 
   onTap: screen()
 
@@ -97,194 +102,282 @@ widget "google calendar" {
     Spacer { width: sz; height: sz; radius: sz / 2; background: tint }
   }
 
-  component Tab(label, name) {
-    Button { text: label; color: tab == name ? accent : muted; onTap: tab = name }
-  }
-
-  // ---------- tile ----------
+  // The tile: what's next big, when under it, then more as fit.
   Column {
-    gap: 3
+    gap: 2
+    fill: true
     Row {
-      gap: 6
       align: center
-      Text { text: lower(fmtTime(now, "EEE d")); style: label; color: accent; weight: 1; maxLines: 1 }
-      Text {
-        text: len(cals) == 0 ? "" : ev == null ? "…" : !ev.ok ? "error" : errCount > 0 ? "!" : todayCount == 0 ? "free" : "${todayCount} today"
-        style: small
-        color: ev != null && (!ev.ok || errCount > 0) ? red : muted
-        width: 56
-        align: end
-      }
+      Text { text: "CALENDAR"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: status; style: label; color: ev != null && (!ev.ok || errCount > 0) ? red : accent; maxLines: 1; visible: (cols ?? 3) >= 4 || status == "!" }
     }
     if len(cals) == 0 {
-      Spacer { weight: 1 }
-      Text { text: "no calendars yet"; style: body; align: center }
-      Text { text: "tap to add one"; style: small; color: muted; align: center }
-      Spacer { weight: 1 }
-    } else if data != null && len(upcoming) == 0 {
-      Spacer { weight: 1 }
-      Text { text: "nothing in the next ${days} days"; style: small; color: muted; align: center }
-      Spacer { weight: 1 }
+      Text { text: "No calendars"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Tap to add one"; style: small; color: muted; maxLines: 1 }
+    } else if ev != null && !ev.ok {
+      Text { text: "Can't read them"; fontSize: 18; bold: true; color: red; maxLines: 1 }
+      Text { text: "Tap for what went wrong"; style: small; color: muted; maxLines: 1 }
+    } else if data == null {
+      Text { text: "Loading…"; fontSize: 18; bold: true; color: muted; maxLines: 1 }
+    } else if len(upcoming) == 0 {
+      Text { text: "Nothing planned"; fontSize: 18; bold: true; maxLines: 1 }
+      Text { text: "Free for ${days} days"; style: small; color: muted; maxLines: 1 }
     } else {
-      Column {
-        gap: 3
-        weight: 1
-        clip: true
-        for l in tileFit {
-          if l.h {
-            Text { text: l.label; style: label; color: l.d == dayKeys[0] ? foreground : muted; padding: [0, 3, 0, 0]; maxLines: 1 }
-          } else {
-            Row {
-              gap: 6
-              align: center
-              Spacer { width: 3; height: 16; radius: 2; background: l.tint }
-              if (cols ?? 3) >= 3 {
-                Text { text: l.when; style: small; color: l.when == "now" ? accent : muted; width: 58; maxLines: 1 }
-              }
-              Text { text: l.t; style: small; weight: 1; maxLines: 1 }
-            }
-          }
+      Text { text: upcoming[0].t; fontSize: 18; bold: true; maxLines: (rows ?? 4) >= 3 ? 2 : 1 }
+      Row {
+        gap: 6
+        align: center
+        Dot { tint: upcoming[0].tint; sz: 8 }
+        Text { text: upcoming[0].d == dayKeys[0] ? upcoming[0].when : "${dayShort[indexOf(dayKeys, upcoming[0].d)]} · ${upcoming[0].when}"; style: small; color: upcoming[0].when == "Now" ? accent : muted; weight: 1; maxLines: 1 }
+      }
+      Spacer { height: 4 }
+      // Two more at 3 rows, three more per row after that.
+      for e in upcoming.drop(1).take(max((rows ?? 4) * 3 - 7, 0)) {
+        Row {
+          gap: 6
+          align: center
+          Spacer { width: 3; height: 14; radius: 2; background: e.tint }
+          Text { text: e.tag; style: small; color: muted; maxLines: 1; visible: (cols ?? 3) >= 3 }
+          Text { text: e.t; style: small; weight: 1; maxLines: 1 }
         }
       }
     }
   }
 
-  // ---------- full screen ----------
-  screen {
-    title: "calendar"
-    Column {
-      gap: 10
-      padding: 4
-      Row {
-        gap: 8
-        Tab { label: "agenda"; name: "agenda" }
-        Tab { label: "settings"; name: "settings" }
-        Spacer { weight: 1 }
-        Button { text: "refresh"; onTap: refresh() }
-      }
+  // ---------- the app ----------
+  let wide = (screenWidth ?? 0) > 600
 
-      if tab == "agenda" {
+  // The next days, a card a day, each event with its time, calendar and place.
+  component Agenda() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: len(cals) == 0 ? "No calendars" : todayCount == 0 ? "Free today" : "${todayCount} today"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: len(cals) == 0 ? "Add a Google calendar or any iCal link" : "${fmtTime(now, "EEEE d MMMM")} · ${len(upcoming)} in the next ${days} days"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      if len(cals) == 0 {
+        Row {
+          Spacer { weight: 1 }
+          Text { text: "Add a calendar"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { editing = -1; newName = ""; newUrl = ""; newColor = 0; newOn = true; addErr = ""; sheet = true } }
+        }
+      } else if ev != null && !ev.ok {
         Column {
-          gap: 6
-          weight: 1
-          scroll: true
-          if len(cals) == 0 {
-            Text { text: "No calendars yet. Add one in settings."; style: body; color: muted }
-            Button { text: "open settings"; onTap: tab = "settings" }
-          } else if ev != null && !ev.ok {
-            Text { text: "couldn't read the calendars"; style: body; color: red }
-            Text { text: ev.err ?? ""; style: small; color: muted; font: mono; maxLines: 8 }
-          } else if data == null {
-            Text { text: "loading…"; style: body; color: muted }
-          } else if len(upcoming) == 0 {
-            Text { text: "Nothing in the next ${days} days."; style: body; color: muted }
-          }
-          for l in lines {
-            if l.h {
-              Text { text: l.label; style: title; fontSize: 18; color: l.d == dayKeys[0] ? accent : foreground; padding: [0, 10, 0, 0] }
-            } else {
-              Row {
-                gap: 10
-                padding: [10, 8]
-                border: 1
-                borderColor: alpha(l.tint, 0.4)
-                background: alpha(l.tint, l.s <= now && !l.a ? 0.18 : 0.06)
-                Spacer { width: 4; height: 40; radius: 2; background: l.tint }
-                Column {
-                  gap: 1
-                  width: 92
-                  Text { text: l.when; style: body; color: l.when == "now" ? accent : foreground; maxLines: 1 }
-                  Text {
-                    text: l.a ? (l.n > 1 ? "${l.n} days" : "") : "–" + fmtTime(l.e, "HH:mm")
-                    style: small
-                    color: muted
-                    maxLines: 1
-                  }
-                }
-                Column {
-                  gap: 1
-                  weight: 1
-                  Text { text: l.t; style: body; maxLines: 2 }
-                  Text { text: l.l != "" ? "${l.cal} · ${l.l}" : l.cal; style: small; color: muted; maxLines: 1 }
-                }
+          gap: 8
+          background: surface
+          radius: 28
+          padding: [20, 16]
+          Text { text: "Couldn't read the calendars"; fontSize: 16; color: red }
+          Text { text: ev.err ?? ""; fontSize: 13; color: muted; font: mono; maxLines: 8 }
+        }
+      } else if data == null {
+        Text { text: "Loading…"; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+      } else if len(upcoming) == 0 {
+        Text { text: "Nothing in the next ${days} days."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+      }
+      for d in eventDays {
+        Text { text: dayLabels[indexOf(dayKeys, d)]; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for e, i in upcoming.filter(e => e.d == d) {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+            Row {
+              gap: 16
+              align: center
+              padding: [20, 14]
+              background: !e.a && e.s <= now ? mix(surface, e.tint, 0.18) : transparent
+              Spacer { width: 4; height: 40; radius: 2; background: e.tint }
+              Column {
+                gap: 0
+                width: 64
+                Text { text: e.when; fontSize: 16; color: e.when == "Now" ? accent : muted; maxLines: 1 }
+                Text { text: e.a ? (e.n > 1 ? "${e.n} days" : "") : fmtTime(e.e, "HH:mm"); fontSize: 14; color: muted; maxLines: 1 }
+              }
+              Column {
+                gap: 0
+                weight: 1
+                Text { text: e.t; fontSize: 16; maxLines: 2 }
+                Text { text: e.l != "" ? "${e.cal} · ${e.l}" : e.cal; fontSize: 14; color: muted; maxLines: 1 }
               }
             }
           }
         }
-      } else {
-        Column {
-          gap: 10
-          weight: 1
-          scroll: true
+      }
+      Row {
+        Spacer { weight: 1 }
+        Text { text: "Refresh"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: refresh(); visible: len(cals) > 0 }
+      }
+    }
+  }
 
-          Text { text: "calendars"; style: label; color: accent }
-          if len(cals) == 0 {
-            Text { text: "None yet: add your first one below."; style: small; color: muted }
-          }
+  // The calendars, each opening the form to change, hide or remove it; a + button adds one.
+  component Calendars() {
+    Column {
+      gap: 12
+      Text { text: "Calendars"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      // Adding, as Google's apps do: a button over the list's corner, opening the form in a sheet.
+      Box {
+        fill: width
+        align: bottomEnd
+        Column {
+          gap: 0
+          fill: width
+          background: surface
+          radius: 28
+          clip: true
           for c, i in cals {
             let err = get(data.errors ?? {}, str(i), "")
             let n = count(upcoming, e => e.c == i)
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
             Row {
-              gap: 10
+              gap: 16
               align: center
-              padding: [10, 8]
-              border: 1
-              borderColor: alpha(muted, 0.3)
-              // Tap the dot to cycle its color.
-              Box {
-                size: 36
-                align: center
-                onTap: cals = range(len(cals)).map(j => j == i ? {name: c.name, url: c.url, on: c.on, color: (c.color + 1) % len(palette)} : cals[j])
-                Dot { tint: c.on ? tints[i] : alpha(muted, 0.5); sz: 18 }
-              }
+              padding: [20, 14]
+              onTap: { editing = i; newName = c.name; newUrl = c.url; newColor = c.color; newOn = c.on; addErr = ""; sheet = true }
+              Dot { tint: c.on ? tints[i] : alpha(muted, 0.5); sz: 14 }
               Column {
-                gap: 1
+                gap: 0
                 weight: 1
-                Text { text: names[i]; style: body; color: c.on ? foreground : muted; maxLines: 1 }
+                Text { text: names[i]; fontSize: 16; color: c.on ? foreground : muted; maxLines: 1 }
                 Text {
-                  text: !c.on ? "hidden" : err != "" ? err : data == null ? "…" : "${n} event${n == 1 ? "" : "s"} in ${days} days"
-                  style: small
+                  text: !c.on ? "Hidden" : err != "" ? err : data == null ? "…" : "${n} event${n == 1 ? "" : "s"} in ${days} days"
+                  fontSize: 14
                   color: c.on && err != "" ? (startsWith(err, "offline") ? yellow : red) : muted
                   maxLines: 2
                 }
               }
-              Button {
-                text: c.on ? "hide" : "show"
-                onTap: { cals = range(len(cals)).map(j => j == i ? {name: c.name, url: c.url, color: c.color, on: !c.on} : cals[j]); refresh() }
+              Text { text: "›"; fontSize: 18; color: muted }
+            }
+          }
+          if len(cals) == 0 {
+            Text { text: "None yet."; fontSize: 16; color: muted; padding: [20, 16] }
+          }
+          // Room at the end, so the add button never covers the last calendar.
+          Spacer { height: 80 }
+        }
+        Box {
+          padding: 12
+          Box {
+            size: 56; radius: 16; align: center; background: accent
+            onTap: { editing = -1; newName = ""; newUrl = ""; newColor = len(cals) % len(palette); newOn = true; addErr = ""; sheet = true }
+            Text { text: "+"; fontSize: 32; color: background; align: center; fill: width }
+          }
+        }
+      }
+      Text { text: "Days ahead"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        background: surface
+        radius: 28
+        padding: [16, 12]
+        Row {
+          gap: 8
+          for d in [3, 7, 14, 30] {
+            Text { text: "${d}"; fontSize: 16; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; color: days == d ? foreground : muted; background: days == d ? mix(surface, accent, 0.22) : transparent; onTap: days = d }
+          }
+        }
+      }
+      Text { text: "Finding the link"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        background: surface
+        radius: 28
+        padding: [20, 16]
+        Text {
+          text: "In Google Calendar on the web: Settings → pick the calendar under \"Settings for my calendars\" → Integrate calendar → copy \"Secret address in iCal format\" (ends in basic.ics). Shared and subscribed calendars have the link too; public ones use \"Public address in iCal format\". Changes on Google can take a few hours to appear in this link."
+          fontSize: 14
+          color: muted
+        }
+      }
+
+    }
+  }
+
+  screen {
+    title: "calendar"
+    // Back from the calendars goes to the agenda first.
+    onBack: { if tab == "agenda" || wide { close() } else { tab = "agenda" } }
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          align: top
+          Agenda { weight: 1 }
+          Calendars { weight: 1 }
+        }
+      } else {
+        Row {
+          gap: 8
+          for v in [["agenda", "Agenda"], ["settings", "Calendars"]] {
+            Text { text: v[1]; fontSize: 16; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; color: tab == v[0] ? foreground : muted; background: tab == v[0] ? mix(surface, accent, 0.22) : transparent; onTap: tab = v[0] }
+          }
+        }
+        if tab == "agenda" { Agenda { } } else { Calendars { } }
+      }
+
+      // The form, over the screen: a name, the link and a color; hide or remove one that's there.
+      if sheet {
+        Sheet {
+          title: editing >= 0 ? "Edit calendar" : "New calendar"
+          onDismiss: { sheet = false; editing = -1 }
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input { text: newName; placeholder: "Name (optional)"; focus: sheet && editing < 0; onChange: newName = value }
+            Input { text: newUrl; placeholder: "Secret address in iCal format"; onChange: { newUrl = trim(value); addErr = "" } }
+            if addErr != "" {
+              Text { text: addErr; fontSize: 14; color: red }
+            }
+            Row {
+              gap: 8
+              align: center
+              for k in range(len(palette)) {
+                Box {
+                  size: 28; radius: 14; align: center; background: palette[k]
+                  border: newColor % len(palette) == k ? 3 : 0; borderColor: foreground
+                  onTap: newColor = k
+                }
               }
-              Button { text: "✕"; color: red; onTap: { cals = cals.take(i) + cals.drop(i + 1); refresh() } }
             }
-          }
-
-          Spacer { height: 6 }
-          Text { text: "add a calendar"; style: label; color: accent }
-          Input { text: newName; placeholder: "name (optional)"; onChange: newName = value }
-          Input { text: newUrl; placeholder: "secret address in iCal format"; onChange: { newUrl = trim(value); addErr = "" } }
-          if addErr != "" {
-            Text { text: addErr; style: small; color: red }
-          }
-          Button {
-            text: "add calendar"
-            onTap: {
-              addErr = match(newUrl, "^(https|webcal)://[^'\"`$\\\\\\s]+$") == null ? "Paste a link that starts with https:// (or webcal://), without spaces, quotes or $." : any(cals, c => c.url == newUrl) ? "That calendar is already added." : ""
-              cals = addErr != "" ? cals : cals + [{name: trim(newName), url: newUrl, color: len(cals) % len(palette), on: true}]
-              newName = addErr != "" ? newName : ""
-              newUrl = addErr != "" ? newUrl : ""
-              refresh()
+            if editing >= 0 {
+              Row {
+                gap: 16
+                align: center
+                onTap: newOn = !newOn
+                Text { text: "Show its events"; fontSize: 16; weight: 1; maxLines: 1 }
+                Box {
+                  width: 52; height: 32; radius: 16; background: newOn ? accent : transparent; border: newOn ? 0 : 2; borderColor: muted
+                  Spacer { size: newOn ? 24 : 16; radius: newOn ? 12 : 8; background: newOn ? background : muted; offset: [newOn ? 24 : 8, newOn ? 4 : 8] }
+                }
+              }
             }
-          }
-          Text {
-            text: "In Google Calendar on the web: Settings → pick the calendar under \"Settings for my calendars\" → Integrate calendar → copy \"Secret address in iCal format\" (ends in basic.ics). Shared and subscribed calendars have the link too; public ones use \"Public address in iCal format\". Changes on Google can take a few hours to appear in this link."
-            style: small
-            color: muted
-          }
-
-          Spacer { height: 6 }
-          Text { text: "days ahead"; style: label; color: accent }
-          Row {
-            gap: 8
-            for d in [3, 7, 14, 30] {
-              Button { text: "${d}"; color: days == d ? accent : muted; onTap: days = d }
+            Row {
+              gap: 8
+              align: center
+              if editing >= 0 {
+                Text { text: "Delete"; fontSize: 15; color: red; maxLines: 1; padding: [8, 12]; onTap: { cals = cals.take(editing) + cals.drop(editing + 1); sheet = false; editing = -1; refresh() } }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: { sheet = false; editing = -1 } }
+              Text {
+                text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  addErr = match(newUrl, "^(https|webcal)://[^'\"`$\\\\\\s]+$") == null ? "Paste a link that starts with https:// (or webcal://), without spaces, quotes or $." : any(range(len(cals)), j => j != editing && cals[j].url == newUrl) ? "That calendar is already added." : ""
+                  if addErr == "" {
+                    if editing >= 0 {
+                      cals = range(len(cals)).map(j => j == editing ? {name: trim(newName), url: newUrl, color: newColor, on: newOn} : cals[j])
+                    } else {
+                      cals = cals + [{name: trim(newName), url: newUrl, color: newColor, on: true}]
+                    }
+                    sheet = false; editing = -1; newName = ""; newUrl = ""
+                    refresh()
+                  }
+                }
+              }
             }
           }
         }

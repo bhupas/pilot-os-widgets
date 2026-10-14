@@ -4,10 +4,10 @@ widget "omaprayer" {
 
   meta {
     description: "Prayer times timetable and Horizon day strip with Aladhan & Kemenag RI methods, Madhab Asr, ihtiyat tuning, city search, and 7-day schedule"
-    version: "1.2"
+    version: "1.3"
     license: "MIT"
     category: "productivity"
-    owl: 5
+    owl: 9
   }
 
   requires {
@@ -21,7 +21,6 @@ widget "omaprayer" {
   state school = "0" persist
   state tuneMin = 0 persist
   state lang = "id" persist
-  state showSettings = false
 
   source now = clock every 10s
 
@@ -202,755 +201,343 @@ widget "omaprayer" {
     { id: "midnight", name: lang == "en" ? "Midnight" : lang == "ar" ? "منتصف الليل" : "Tengah Malam (Nisfu Lail)", ar: "منتصف الليل", time: tMidnight, isNext: false, isCurrent: false }
   ]
 
-  onTap: {
-    showSettings = false
-    screen()
+  // The words it shows, in the language picked.
+  let L = lang == "en" ? {
+    title: "Prayer times", label: "PRAYER", tomorrow: "tomorrow", soon: "Prayer time now", today: "Today", week: "Next 7 days",
+    settings: "Settings", city: "City", method: "Calculation method", school: "Asr madhab", tune: "Ihtiyat margin", language: "Language",
+    cityHint: "Type a city, e.g. London", auto: "Automatic", cancel: "Cancel", save: "Save", refresh: "Refresh",
+    notFound: "Can't find '${city}'", zone: "Time zone", day: "Day", left: "in ${countdownStr}"
+  } : lang == "ar" ? {
+    title: "مواقيت الصلاة", label: "الصلاة", tomorrow: "غداً", soon: "وقت الصلاة!", today: "اليوم", week: "الأيام السبعة القادمة",
+    settings: "الإعدادات", city: "المدينة", method: "طريقة الحساب", school: "مذهب العصر", tune: "الاحتياط", language: "اللغة",
+    cityHint: "اكتب اسم المدينة", auto: "تلقائي", cancel: "إلغاء", save: "حفظ", refresh: "تحديث",
+    notFound: "المدينة '${city}' غير موجودة", zone: "المنطقة الزمنية", day: "اليوم", left: "بعد ${countdownStr}"
+  } : {
+    title: "Jadwal shalat", label: "SHALAT", tomorrow: "besok", soon: "Waktu shalat!", today: "Hari ini", week: "7 hari ke depan",
+    settings: "Pengaturan", city: "Kota", method: "Metode perhitungan", school: "Madzhab Ashar", tune: "Koreksi ihtiyat", language: "Bahasa",
+    cityHint: "Ketik kota, mis. Bandung", auto: "Otomatis", cancel: "Batal", save: "Simpan", refresh: "Muat ulang",
+    notFound: "Kota '${city}' tidak ditemukan", zone: "Zona waktu", day: "Hari", left: "${countdownStr} lagi"
   }
 
-  // Unified reusable chip styling
-  component BaseChip(label, selected) {
-    Row {
-      fill: width
-      justify: center
-      align: center
-      padding: [4, 7]
-      background: selected ? accent : alpha(surface, 0.9)
-      border: 1
-      borderColor: selected ? accent : alpha(muted, 0.6)
-      Text {
-        text: label
-        style: small
-        bold: selected
-        color: selected ? background : foreground
-        align: center
-        maxLines: 1
-      }
-    }
-  }
+  // The next prayer, when, and where.
+  let nextLine = prayerSoon ? "${nextName} · ${L.soon}" : "${nextName} · ${L.left}" + (isTomorrow ? " · ${L.tomorrow}" : "")
+  let placeLine = notFound ? L.notFound : placeName + (len(countryName) > 0 ? ", " + countryName : "")
 
-  component CityChip(label, val) {
-    Row {
-      fill: width
-      onTap: { city = val; refresh() }
-      BaseChip { label: label; selected: city == val }
-    }
-  }
+  // The choices behind the settings, each opened in a sheet.
+  state sheet = ""                // "city", "method", "school", "tune" or "lang" while its sheet is open
+  let methods = [
+    {v: "20", l: lang == "en" ? "Kemenag RI (Indonesia)" : "Kemenag RI"},
+    {v: "3", l: lang == "en" ? "Muslim World League" : "MWL (Rabitah)"},
+    {v: "4", l: lang == "en" ? "Umm al-Qura, Makkah" : "Umm al-Qura Makkah"},
+    {v: "5", l: lang == "en" ? "Egyptian Authority" : "Mesir (EGAS)"},
+    {v: "11", l: lang == "en" ? "Singapore (MUIS)" : "Singapura (MUIS)"},
+    {v: "2", l: lang == "en" ? "ISNA (North America)" : "ISNA (Amerika)"}
+  ]
+  let schools = [{v: "0", l: lang == "en" ? "Shafi'i (standard)" : "Syafi'i (standar)"}, {v: "1", l: lang == "en" ? "Hanafi (later Asr)" : "Hanafi (bayangan 2x)"}]
+  let tunes = [
+    {v: 0, l: lang == "en" ? "None" : lang == "ar" ? "بدون" : "Tanpa koreksi"},
+    {v: 1, l: "+1 min"},
+    {v: 2, l: lang == "en" ? "+2 min (Indonesia's standard)" : "+2 min (standar RI)"},
+    {v: 3, l: "+3 min"}
+  ]
+  let langs = [{v: "id", l: "Indonesia"}, {v: "en", l: "English"}, {v: "ar", l: "العربية"}]
+  let cityPicks = [{l: L.auto, v: "auto"}, {l: "Jakarta", v: "Jakarta"}, {l: "Bandung", v: "Bandung"}, {l: "Surabaya", v: "Surabaya"}, {l: "Yogyakarta", v: "Yogyakarta"}, {l: "Medan", v: "Medan"}, {l: "Makassar", v: "Makassar"}, {l: lang == "ar" ? "مكة" : "Makkah", v: "Mecca"}]
+  let options = sheet == "method" ? methods : sheet == "school" ? schools : sheet == "tune" ? tunes : sheet == "lang" ? langs : []
+  let chosen = sheet == "method" ? method : sheet == "school" ? school : sheet == "tune" ? tuneMin : lang
+  let settingRows = [
+    {k: "city", l: L.city, v: city == "auto" ? "${L.auto} · ${placeName}" : placeName},
+    {k: "method", l: L.method, v: methods.find(o => o.v == method).l ?? methodName},
+    {k: "school", l: L.school, v: schoolName},
+    {k: "tune", l: L.tune, v: tunes.find(o => o.v == tuneMin).l ?? "+${tuneMin} min"},
+    {k: "lang", l: L.language, v: langs.find(o => o.v == lang).l ?? lang}
+  ]
 
-  component MethodChip(label, val) {
-    Row {
-      fill: width
-      onTap: { method = val; refresh() }
-      BaseChip { label: label; selected: method == val }
-    }
-  }
+  onTap: screen()
 
-  component SchoolChip(label, val) {
-    Row {
-      fill: width
-      onTap: { school = val; refresh() }
-      BaseChip { label: label; selected: school == val }
-    }
-  }
-
-  component TuneChip(label, val) {
-    Row {
-      fill: width
-      onTap: { tuneMin = val; refresh() }
-      BaseChip { label: label; selected: tuneMin == val }
-    }
-  }
-
-  component LangChip(label, val) {
-    Row {
-      fill: width
-      onTap: { lang = val }
-      BaseChip { label: label; selected: lang == val }
-    }
-  }
-
+  // A prayer in the tile's grid, the current one tonal.
   component PrayerCard(p) {
     let isCurrent = p.id == activeId
-    let isNext = p.id == nextId
     let isPast = p.targetMin <= curMin && !isCurrent
-
     Column {
-      gap: 1
+      gap: 0
       align: center
-      padding: [3, 4]
-      background: isCurrent ? alpha(accent, 0.22) : alpha(surface, 0.45)
-      border: 1
-      borderColor: isCurrent ? accent : rgb(0, 0, 0, 0)
+      padding: [2, 4]
+      radius: 8 * corners
+      background: isCurrent ? mix(surface, accent, 0.22) : alpha(surface, 0.45)
+      Text { text: p.name; fontSize: 10; bold: isCurrent; color: isCurrent ? accent : isPast ? muted : foreground; align: center; fill: width; maxLines: 1 }
+      Text { text: p.time ?? "—:—"; fontSize: 12; bold: isCurrent; color: isCurrent ? accent : isPast ? muted : foreground; align: center; fill: width; maxLines: 1 }
+    }
+  }
 
-      Text {
-        text: p.name
-        fontSize: 10
-        bold: isCurrent
-        color: isCurrent ? accent : isPast ? muted : foreground
-        align: center
-        maxLines: 1
-      }
-      Text {
-        text: p.time ?? "—:—"
-        fontSize: 11
-        bold: isCurrent
-        color: isCurrent ? accent : isPast ? muted : foreground
-        align: center
-        maxLines: 1
+  // The day as a strip: the night, Fajr to sunrise, the day's prayers in their colours, and now.
+  component Horizon() {
+    Canvas {
+      height: 8
+      fill: width
+      rect(0, 0, width, height, radius: 4, fill: alpha(muted, 0.2))
+
+      let xF = clamp((fMin / 1440) * width, 0, width)
+      let xS = clamp((sMin / 1440) * width, 0, width)
+      let xD = clamp((dMin / 1440) * width, 0, width)
+      let xA = clamp((aMin / 1440) * width, 0, width)
+      let xM = clamp((mgMin / 1440) * width, 0, width)
+      let xI = clamp((iMin / 1440) * width, 0, width)
+
+      rect(xF, 0, max(xS - xF, 2), height, fill: alpha(cyan, 0.7))
+      rect(xS, 0, max(xD - xS, 2), height, fill: alpha(surface, 0.4))
+      rect(xD, 0, max(xA - xD, 2), height, fill: alpha(yellow, 0.7))
+      rect(xA, 0, max(xM - xA, 2), height, fill: alpha(orange, 0.7))
+      rect(xM, 0, max(xI - xM, 2), height, fill: alpha(red, 0.7))
+      rect(xI, 0, max(width - xI, 2), height, fill: alpha(blue, 0.7))
+
+      let curX = clamp((curMin / 1440) * width, 0, width)
+      rect(max(curX - 2, 0), 0, 4, height, radius: 2, fill: accent)
+      circle(curX, height / 2, 4, fill: accent)
+    }
+  }
+
+  // The tile: the next prayer's time big, which one and how long until it; the place, the day strip and every
+  // prayer when there's room.
+  let short = (rows ?? 3) < 3
+  let showGrid = ((cols ?? 3) >= 6 && (rows ?? 3) >= 3) || (rows ?? 3) >= 4
+  Column {
+    gap: 2
+    fill: true
+    Text { text: L.label; style: label; color: muted; maxLines: 1 }
+    Text { text: nextTimeRaw ?? "—:—"; fontSize: 40; maxLines: 1; color: prayerSoon ? red : foreground }
+    Text { text: nextLine; style: small; color: prayerSoon ? red : accent; maxLines: 1 }
+    if !short {
+      Text { text: notFound ? L.notFound : hijriDisplay != "" ? "${placeName} · ${hijriDisplay}" : placeName; style: small; color: notFound ? red : muted; maxLines: 1 }
+      Spacer { weight: 1 }
+      Horizon { }
+      if showGrid {
+        Spacer { height: 4 }
+        Grid {
+          columns: (cols ?? 3) < 6 ? 3 : 6
+          gap: 4
+          fill: width
+          for p in tilePrayers key p.id {
+            PrayerCard { p: p }
+          }
+        }
       }
     }
   }
 
-  component ScreenRow(row) {
-    Row {
-      gap: 10
-      align: center
-      padding: [10, 8]
-      background: row.isCurrent ? alpha(accent, 0.15) : alpha(surface, 0.3)
-      border: 1
-      borderColor: row.isCurrent ? accent : rgb(0, 0, 0, 0)
-
-      Text {
-        text: row.isCurrent ? "●" : "○"
-        color: row.isCurrent ? accent : muted
-        fontSize: 12
-        width: 16
+  // Today's times on a card, the current one tonal and the next with how long until it.
+  component Today() {
+    Column {
+      gap: 12
+      Row {
         align: center
+        padding: [4, 8, 0, 0]
+        Text { text: L.today; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+        Text { text: tzName != "Asia/Jakarta" && tzName != "UTC" && city != "auto" ? "${curTimeStr} · ${tzName}" : curTimeStr; fontSize: 14; color: muted; maxLines: 1 }
       }
       Column {
         gap: 0
-        weight: 1
-        Text {
-          text: row.isNext ? "${row.name}  (${countdownStr})" : row.name
-          style: body
-          bold: row.isCurrent
-          color: row.isCurrent ? accent : row.isNext ? (prayerSoon ? red : accent) : foreground
-          maxLines: 1
+        background: surface
+        radius: 28
+        clip: true
+        Box { padding: [20, 16, 20, 12]; Horizon { } }
+        for row in screenPrayers key row.id {
+          Spacer { height: 1; fill: width; background: border }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 12]
+            background: row.isCurrent ? mix(surface, accent, 0.22) : surface
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: row.name; fontSize: 16; bold: row.isCurrent || row.isNext; color: row.isNext ? (prayerSoon ? red : accent) : foreground; maxLines: 1 }
+              Text { text: row.isNext ? "${row.ar} · ${L.left}" : row.ar; fontSize: 14; color: row.isNext && prayerSoon ? red : muted; maxLines: 1 }
+            }
+            Text { text: row.time ?? "—:—"; fontSize: 16; font: mono; bold: row.isCurrent || row.isNext; color: row.isNext ? (prayerSoon ? red : accent) : foreground; maxLines: 1 }
+          }
         }
-        Text {
-          text: row.ar
-          style: small
-          color: muted
-        }
-      }
-      Text {
-        text: row.time ?? "—:—"
-        style: body
-        bold: row.isCurrent
-        color: row.isCurrent ? accent : foreground
-        width: 65
-        align: end
       }
     }
   }
 
-  Column {
-    gap: 6
-    padding: 0
-
-    // Header: City and Date
-    Row {
-      gap: 6
-      align: center
-      Text {
-        text: notFound ? "⚠️ CITY NOT FOUND" : "🕌 " + upper(placeName)
-        style: label
-        color: notFound ? red : accent
-        bold: true
-        weight: 1
-        maxLines: 1
-      }
-      Text {
-        text: fmtTime(now, "EEE, d MMM")
-        style: small
-        color: muted
-        width: 85
-        align: end
-        maxLines: 1
-      }
-    }
-
-    if notFound {
-      Text {
-        text: lang == "en" ? "Location '${city}' not found. Tap to change." : "Kota '${city}' tidak ditemukan. Klik untuk ubah."
-        style: small
-        color: red
-        maxLines: 1
-      }
-    } else {
-      Text {
-        text: hijriDisplay != "" ? hijriDisplay : gregDisplay
-        style: small
-        color: muted
-        maxLines: 1
-      }
-    }
-
-    // Hero Next Prayer Countdown Card
-    Row {
-      gap: 8
-      align: center
-      padding: [8, 6]
-      background: alpha(accent, 0.12)
-      border: 1
-      borderColor: alpha(accent, 0.35)
-
+  // The coming week, a row a day: the date and Hijri date, then the five prayers.
+  component Week() {
+    Column {
+      gap: 12
+      Text { text: L.week; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
       Column {
-        gap: 1
-        weight: 1
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
         Row {
           gap: 4
-          align: center
-          Text {
-            text: upper(nextName)
-            fontSize: 16
-            bold: true
-            color: foreground
-            maxLines: 1
+          padding: [16, 12, 16, 6]
+          Text { text: L.day; style: label; color: muted; weight: 1; maxLines: 1 }
+          for p in tilePrayers.filter(p => p.id != "sunrise") key p.id {
+            Text { text: p.name; style: label; color: muted; width: 44; align: center; maxLines: 1 }
           }
-          if isTomorrow {
-            Text {
-              text: lang == "en" ? "(tmrw)" : lang == "ar" ? "(غداً)" : "(besok)"
-              fontSize: 10
-              color: muted
-              maxLines: 1
+        }
+        for d, idx in weekDays key d.date.gregorian.date {
+          Spacer { height: 1; fill: width; background: border }
+          Row {
+            gap: 4
+            align: center
+            padding: [16, 10]
+            background: idx == 0 ? mix(surface, accent, 0.22) : surface
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: d.date.gregorian.day + " " + (d.date.gregorian.month.en != null ? sub(d.date.gregorian.month.en, 0, 3) : ""); fontSize: 14; bold: idx == 0; maxLines: 1 }
+              Text { text: d.date.hijri.day + " " + d.date.hijri.month.en; fontSize: 12; color: muted; maxLines: 1 }
+            }
+            for t in [d.timings.Fajr, d.timings.Dhuhr, d.timings.Asr, d.timings.Maghrib, d.timings.Isha] {
+              Text { text: sub(t, 0, 5); fontSize: 13; font: mono; width: 44; align: center; maxLines: 1 }
             }
           }
         }
-        Text {
-          text: nextTimeRaw ?? "—:—"
-          fontSize: 13
-          color: muted
-          maxLines: 1
-        }
-      }
-
-      Column {
-        width: 82
-        gap: 0
-        align: end
-        Text {
-          text: countdownStr
-          fontSize: 16
-          bold: true
-          color: prayerSoon ? red : accent
-          align: end
-          maxLines: 1
-        }
-        Text {
-          text: prayerSoon ? (lang == "en" ? "prayer time!" : lang == "ar" ? "وقت الصلاة!" : "waktu shalat!") : (lang == "en" ? "remaining" : lang == "ar" ? "متبقي" : "tersisa")
-          style: small
-          color: prayerSoon ? red : muted
-          align: end
-          maxLines: 1
-        }
-      }
-    }
-
-    // Horizon Day Strip
-    Column {
-      gap: 2
-      Row {
-        fill: width
-        align: center
-        Text {
-          text: tzName != "Asia/Jakarta" && tzName != "UTC" && city != "auto" ? "HORIZON · " + tzName : "HORIZON"
-          style: label
-          color: muted
-          fontSize: 9
-          weight: 1
-        }
-        Text {
-          text: curTimeStr
-          style: label
-          color: accent
-          fontSize: 10
-          width: 40
-          align: end
-        }
-      }
-      Canvas {
-        height: 8
-        fill: width
-        rect(0, 0, width, height, radius: 4, fill: alpha(muted, 0.2))
-
-        let xF = clamp((fMin / 1440) * width, 0, width)
-        let xS = clamp((sMin / 1440) * width, 0, width)
-        let xD = clamp((dMin / 1440) * width, 0, width)
-        let xA = clamp((aMin / 1440) * width, 0, width)
-        let xM = clamp((mgMin / 1440) * width, 0, width)
-        let xI = clamp((iMin / 1440) * width, 0, width)
-
-        rect(xF, 0, max(xS - xF, 2), height, fill: alpha(cyan, 0.7))
-        rect(xS, 0, max(xD - xS, 2), height, fill: alpha(surface, 0.4))
-        rect(xD, 0, max(xA - xD, 2), height, fill: alpha(yellow, 0.7))
-        rect(xA, 0, max(xM - xA, 2), height, fill: alpha(orange, 0.7))
-        rect(xM, 0, max(xI - xM, 2), height, fill: alpha(red, 0.7))
-        rect(xI, 0, max(width - xI, 2), height, fill: alpha(blue, 0.7))
-
-        let curX = clamp((curMin / 1440) * width, 0, width)
-        rect(max(curX - 2, 0), 0, 4, height, radius: 2, fill: accent)
-        circle(curX, height / 2, 4, fill: accent)
-      }
-    }
-
-    // Ruled Timetable: 6 prayers
-    Grid {
-      columns: cols < 6 ? 3 : 6
-      gap: 4
-      fill: width
-
-      for p in tilePrayers key p.id {
-        PrayerCard { p: p }
+        if len(weekDays) == 0 { Text { text: lat == null ? "…" : "Loading…"; fontSize: 16; color: muted; padding: [20, 16] } }
       }
     }
   }
 
-  // Full screen view
-  screen {
-    title: lang == "en" ? "Prayer Times" : lang == "ar" ? "مواقيت الصلاة" : "Jadwal Shalat"
-
+  // Where and how it works it out; each opens its choices in a sheet.
+  component Settings() {
     Column {
-      scroll: true
       gap: 12
-      padding: [4, 8]
-
-      // Screen Header
-      Row {
-        gap: 10
-        align: center
-        Column {
-          gap: 2
-          weight: 1
-          Text {
-            text: "🕌 " + placeName + (len(countryName) > 0 ? ", " + countryName : "")
-            fontSize: 20
-            bold: true
-            color: foreground
-          }
-          Text {
-            text: gregDisplay + (hijriDisplay != "" ? " · " + hijriDisplay : "")
-            style: small
-            color: muted
-          }
-          Text {
-            text: methodName + " · " + (lang == "en" ? "School: " : lang == "ar" ? "المذهب: " : "Madzhab: ") + schoolName + (tuneMin > 0 ? " · +" + tuneMin + "m" : "")
-            style: label
-            color: accent
-          }
-        }
-        Row {
-          width: 90
-          justify: center
-          align: center
-          padding: [6, 8]
-          background: accent
-          border: 1
-          borderColor: accent
-          onTap: refresh()
-          Text {
-            text: lang == "en" ? "🔄 Refresh" : lang == "ar" ? "🔄 تحديث" : "🔄 Refresh"
-            style: small
-            bold: true
-            color: background
+      Text { text: L.settings; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for r, i in settingRows key r.k {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Row {
+            gap: 16
             align: center
-          }
-        }
-      }
-
-      // View Navigation Tabs
-      Row {
-        gap: 8
-        fill: width
-        Row {
-          weight: 1
-          justify: center
-          align: center
-          padding: [8, 8]
-          background: !showSettings ? accent : alpha(surface, 0.7)
-          border: 1
-          borderColor: !showSettings ? accent : alpha(muted, 0.4)
-          onTap: {
-            showSettings = false
-          }
-          Text {
-            text: lang == "en" ? "📅 Schedule Details" : lang == "ar" ? "📅 تفاصيل الجدول" : "📅 Jadwal Shalat"
-            style: small
-            bold: !showSettings
-            color: !showSettings ? background : foreground
-            align: center
-          }
-        }
-        Row {
-          weight: 1
-          justify: center
-          align: center
-          padding: [8, 8]
-          background: showSettings ? accent : alpha(surface, 0.7)
-          border: 1
-          borderColor: showSettings ? accent : alpha(muted, 0.4)
-          onTap: {
-            showSettings = true
-          }
-          Text {
-            text: lang == "en" ? "⚙️ Settings" : lang == "ar" ? "⚙️ الإعدادات" : "⚙️ Pengaturan"
-            style: small
-            bold: showSettings
-            color: showSettings ? background : foreground
-            align: center
-          }
-        }
-      }
-
-      // PRIMARY VIEW
-      if !showSettings {
-        // Next Prayer Detailed Card
-        Row {
-          gap: 16
-          align: center
-          padding: [14, 12]
-          background: alpha(accent, 0.15)
-          border: 1
-          borderColor: alpha(accent, 0.4)
-
-          Box {
-            width: 72
-            height: 72
-            align: center
-            Ring {
-              fill: true
-              thickness: 7
-              value: clamp(1 - (minLeft / 360), 0.1, 1)
-              color: prayerSoon ? red : accent
-              track: alpha(muted, 0.25)
+            padding: [20, 14]
+            onTap: {
+              if r.k == "city" { typedCity = city == "auto" ? "" : city }
+              sheet = r.k
             }
             Column {
               gap: 0
-              align: center
-              Text {
-                text: nextAr
-                fontSize: 12
-                color: accent
-                align: center
-              }
-              Text {
-                text: nextTimeRaw ?? "—:—"
-                fontSize: 13
-                bold: true
-                align: center
-              }
-            }
-          }
-
-          Column {
-            gap: 2
-            weight: 1
-            Text {
-              text: lang == "en" ? "NEXT PRAYER" : lang == "ar" ? "الصلاة القادمة" : "SHALAT BERIKUTNYA"
-              style: label
-              color: muted
-            }
-            Text {
-              text: upper(nextName)
-              fontSize: 24
-              bold: true
-              color: foreground
-            }
-            Text {
-              text: (lang == "en" ? "Remaining: " : lang == "ar" ? "المتبقي: " : "Tersisa: ") + countdownStr + " (" + (nextTimeRaw ?? "—:—") + ")"
-              style: body
-              color: prayerSoon ? red : accent
-              bold: true
-            }
-          }
-        }
-
-        Text {
-          text: lang == "en" ? "TODAY'S SCHEDULE" : lang == "ar" ? "جدول مواقيت اليوم" : "JADWAL SHALAT HARI INI"
-          style: label
-          color: accent
-        }
-
-        // Full Schedule Rows
-        Column {
-          gap: 4
-          for row in screenPrayers key row.id {
-            ScreenRow { row: row }
-          }
-        }
-
-        // 7-Day Forecast Section
-        if len(weekDays) > 0 {
-          Spacer { height: 4 }
-          Text {
-            text: lang == "en" ? "7-DAY UPCOMING SCHEDULE" : lang == "ar" ? "جدول الـ 7 أيام القادمة" : "JADWAL 7 HARI KE DEPAN"
-            style: label
-            color: accent
-          }
-
-          Column {
-            gap: 4
-            Row {
-              gap: 4
-              padding: [4, 6]
-              Text { text: lang == "en" ? "DAY" : lang == "ar" ? "اليوم" : "HARI"; style: label; color: muted; width: 62 }
-              Text { text: "HIJRI"; style: label; color: muted; weight: 1 }
-              Text { text: lang == "en" ? "FAJR" : lang == "ar" ? "فجر" : "SUBUH"; style: label; color: muted; width: 44; align: center }
-              Text { text: lang == "en" ? "DHUHR" : lang == "ar" ? "ظهر" : "DZUHUR"; style: label; color: muted; width: 44; align: center }
-              Text { text: lang == "en" ? "ASR" : lang == "ar" ? "عصر" : "ASHAR"; style: label; color: muted; width: 44; align: center }
-              Text { text: lang == "ar" ? "مغرب" : "MAGHRIB"; style: label; color: muted; width: 44; align: center }
-              Text { text: lang == "en" ? "ISHA" : lang == "ar" ? "عشاء" : "ISYA"; style: label; color: muted; width: 44; align: center }
-            }
-            for d, idx in weekDays key d.date.gregorian.date {
-              Row {
-                gap: 4
-                padding: [4, 6]
-                background: idx == 0 ? alpha(accent, 0.12) : alpha(surface, 0.3)
-                border: 1
-                borderColor: idx == 0 ? alpha(accent, 0.3) : rgb(0, 0, 0, 0)
-                Text {
-                  text: d.date.gregorian.day + " " + (d.date.gregorian.month.en != null ? sub(d.date.gregorian.month.en, 0, 3) : "")
-                  style: small
-                  bold: idx == 0
-                  color: idx == 0 ? accent : foreground
-                  width: 62
-                }
-                Text {
-                  text: d.date.hijri.day + " " + d.date.hijri.month.en
-                  style: small
-                  color: muted
-                  weight: 1
-                  maxLines: 1
-                }
-                Text { text: sub(d.timings.Fajr, 0, 5); style: small; width: 44; align: center; color: idx == 0 ? accent : foreground }
-                Text { text: sub(d.timings.Dhuhr, 0, 5); style: small; width: 44; align: center }
-                Text { text: sub(d.timings.Asr, 0, 5); style: small; width: 44; align: center }
-                Text { text: sub(d.timings.Maghrib, 0, 5); style: small; width: 44; align: center }
-                Text { text: sub(d.timings.Isha, 0, 5); style: small; width: 44; align: center }
-              }
-            }
-          }
-        }
-
-        // Quick Settings Button
-        Row {
-          fill: width
-          justify: center
-          align: center
-          padding: [8, 10]
-          background: alpha(surface, 0.7)
-          border: 1
-          borderColor: alpha(muted, 0.4)
-          onTap: {
-            showSettings = true
-          }
-          Text {
-            text: lang == "en" ? "⚙️ Change Location, Method or Language" : lang == "ar" ? "⚙️ تغيير الموقع أو الطريقة أو اللغة" : "⚙️ Ubah Lokasi, Metode atau Bahasa"
-            style: small
-            color: accent
-            align: center
-          }
-        }
-      }
-
-      // SETTINGS VIEW
-      if showSettings {
-        Row {
-          fill: width
-          align: center
-          padding: [8, 10]
-          background: alpha(accent, 0.15)
-          border: 1
-          borderColor: alpha(accent, 0.5)
-          onTap: {
-            showSettings = false
-          }
-          Text {
-            text: lang == "en" ? "← Back to Schedule Details" : lang == "ar" ? "← العودة إلى تفاصيل الجدول" : "← Kembali ke Jadwal Shalat"
-            style: small
-            bold: true
-            color: accent
-          }
-        }
-
-        // 1. Location Settings
-        Column {
-          gap: 6
-          padding: [10, 10]
-          background: alpha(surface, 0.4)
-          border: 1
-          borderColor: alpha(border, 0.5)
-
-          Text {
-            text: lang == "en" ? "📍 CITY / LOCATION SETTINGS" : lang == "ar" ? "📍 إعدادات المدينة / الموقع" : "📍 PENGATURAN KOTA / LOKASI"
-            style: label
-            color: accent
-          }
-          Text {
-            text: lang == "en" ? "Type city name and press Search / Enter, or pick below:" : lang == "ar" ? "اكتب اسم المدينة واضغط بحث أو اختر من القائمة أدناه:" : "Ketik nama kota lalu tekan Cari / Enter, atau klik pilihan di bawah:"
-            style: small
-            color: muted
-          }
-
-          Row {
-            gap: 6
-            align: center
-            Input {
               weight: 1
-              placeholder: lang == "en" ? "Type city (e.g. Jakarta, London)..." : lang == "ar" ? "اكتب اسم المدينة (مثال: مكة)..." : "Ketik kota (mis: Jakarta, Bandung)..."
-              clear: false
-              onChange: {
-                typedCity = value
-              }
-              onSubmit: {
-                city = len(value) > 0 ? value : city
-                refresh()
-              }
+              Text { text: r.l; fontSize: 16; maxLines: 1 }
+              Text { text: r.v; fontSize: 14; color: r.k == "city" && notFound ? red : muted; maxLines: 1 }
             }
-            Row {
-              width: 65
-              justify: center
-              align: center
-              padding: [7, 8]
-              background: accent
-              border: 1
-              borderColor: accent
-              onTap: {
-                city = len(typedCity) > 0 ? typedCity : city
-                refresh()
-              }
-              Text {
-                text: lang == "en" ? "Search" : lang == "ar" ? "بحث" : "Cari"
-                style: small
-                bold: true
-                color: background
-                align: center
-              }
-            }
-          }
-
-          Grid {
-            columns: 4
-            gap: 6
-            CityChip { label: "Jakarta"; val: "Jakarta" }
-            CityChip { label: "Bandung"; val: "Bandung" }
-            CityChip { label: "Surabaya"; val: "Surabaya" }
-            CityChip { label: "Yogya"; val: "Yogyakarta" }
-            CityChip { label: "Medan"; val: "Medan" }
-            CityChip { label: "Makassar"; val: "Makassar" }
-            CityChip { label: lang == "ar" ? "مكة" : "Makkah"; val: "Mecca" }
-            CityChip { label: "📍 Auto"; val: "auto" }
-          }
-        }
-
-        // 2. Calculation Method & Madzhab
-        Column {
-          gap: 6
-          padding: [10, 10]
-          background: alpha(surface, 0.4)
-          border: 1
-          borderColor: alpha(border, 0.5)
-
-          Text {
-            text: lang == "en" ? "📐 CALCULATION METHOD" : lang == "ar" ? "📐 طريقة الحساب" : "📐 METODE PERHITUNGAN"
-            style: label
-            color: accent
-          }
-          Grid {
-            columns: 2
-            gap: 6
-            MethodChip { label: lang == "en" ? "Kemenag RI (Indonesia)" : "Kemenag RI"; val: "20" }
-            MethodChip { label: lang == "en" ? "Muslim World League" : "MWL (Rabitah)"; val: "3" }
-            MethodChip { label: lang == "en" ? "Umm al-Qura Mecca" : "Umm al-Qura Makkah"; val: "4" }
-            MethodChip { label: lang == "en" ? "Egyptian Authority" : "Mesir (EGAS)"; val: "5" }
-            MethodChip { label: lang == "en" ? "Singapore (MUIS)" : "Singapura (MUIS)"; val: "11" }
-            MethodChip { label: lang == "en" ? "ISNA (North America)" : "ISNA (Amerika)"; val: "2" }
-          }
-
-          Spacer { height: 4 }
-          Text {
-            text: lang == "en" ? "⚖️ ASR JURISTIC METHOD (MADHAB)" : lang == "ar" ? "⚖️ مذهب وقت العصر" : "⚖️ MADZHAB WAKTU ASHAR"
-            style: label
-            color: accent
-          }
-          Grid {
-            columns: 2
-            gap: 6
-            SchoolChip { label: lang == "en" ? "Shafi'i (Standard)" : "Syafi'i (Standar)"; val: "0" }
-            SchoolChip { label: lang == "en" ? "Hanafi (Later Asr)" : "Hanafi (Bayangan 2x)"; val: "1" }
-          }
-
-          Spacer { height: 4 }
-          Text {
-            text: lang == "en" ? "⏱️ IHTIYAT SAFETY MARGIN (MINS)" : lang == "ar" ? "⏱️ تصحيح الاحتياط (دقائق)" : "⏱️ KOREKSI IHTIYAT (MENIT)"
-            style: label
-            color: accent
-          }
-          Grid {
-            columns: 4
-            gap: 6
-            TuneChip { label: "0m"; val: 0 }
-            TuneChip { label: "+1m"; val: 1 }
-            TuneChip { label: lang == "en" ? "+2m (Default RI)" : "+2m (RI)"; val: 2 }
-            TuneChip { label: "+3m"; val: 3 }
-          }
-
-          Spacer { height: 4 }
-          Text {
-            text: lang == "en" ? "🌐 LANGUAGE" : lang == "ar" ? "🌐 اللغة" : "🌐 BAHASA / LANGUAGE"
-            style: label
-            color: accent
-          }
-          Grid {
-            columns: 3
-            gap: 6
-            LangChip { label: "Indonesia"; val: "id" }
-            LangChip { label: "English"; val: "en" }
-            LangChip { label: "العربية"; val: "ar" }
-          }
-        }
-
-        // Done button
-        Row {
-          fill: width
-          justify: center
-          align: center
-          padding: [9, 10]
-          background: accent
-          border: 1
-          borderColor: accent
-          onTap: {
-            showSettings = false
-          }
-          Text {
-            text: lang == "en" ? "✓ Done / Back to Schedule" : lang == "ar" ? "✓ تم / العودة إلى الجدول" : "✓ Selesai / Kembali ke Jadwal"
-            style: small
-            bold: true
-            color: background
-            align: center
+            Text { text: "›"; fontSize: 18; color: muted }
           }
         }
       }
+      Text { text: "${L.zone}: ${tzName} · ${methodName}"; fontSize: 14; color: muted; padding: [8, 0] }
+      Text { text: L.refresh; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: refresh() }
+    }
+  }
 
-      // Footer
-      Spacer { height: 6 }
-      Row {
-        justify: spaceBetween
-        align: center
-        Text {
-          text: (lang == "en" ? "Timezone: " : lang == "ar" ? "المنطقة الزمنية: " : "Zona Waktu: ") + tzName
-          style: small
-          color: muted
-        }
+  screen {
+    title: L.title
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: nextTimeRaw ?? "—:—"; fontSize: 48; bold: true; maxLines: 1; color: prayerSoon ? red : foreground }
+        Text { text: nextLine; fontSize: 16; color: prayerSoon ? red : accent; maxLines: 1 }
+        Text { text: placeLine + " · " + gregDisplay + (hijriDisplay != "" ? " · " + hijriDisplay : ""); fontSize: 16; color: notFound ? red : muted; maxLines: 2 }
+      }
+      if (screenWidth ?? 0) > 600 {
         Row {
-          padding: [8, 6]
-          background: alpha(surface, 0.9)
-          border: 1
-          borderColor: alpha(muted, 0.6)
-          onTap: close()
-          Text {
-            text: lang == "en" ? "✕ Close" : lang == "ar" ? "✕ إغلاق" : "✕ Tutup"
-            style: small
-            color: foreground
+          gap: 24
+          Today { weight: 1 }
+          Column {
+            gap: 12
+            weight: 1
+            Week { }
+            Settings { }
+          }
+        }
+      } else {
+        Today { }
+        Week { }
+        Settings { }
+      }
+    }
+
+    // The city: typed, or one of the usual ones.
+    if sheet == "city" {
+      Sheet {
+        title: L.city
+        onDismiss: sheet = ""
+        Column {
+          gap: 16
+          padding: [0, 4, 0, 4]
+          Input {
+            text: typedCity
+            placeholder: L.cityHint
+            focus: sheet == "city"
+            onChange: typedCity = value
+            onSubmit: {
+              city = len(value) > 0 ? value : city
+              sheet = ""
+              refresh()
+            }
+          }
+          Flow {
+            gap: 8
+            for c in cityPicks key c.v {
+              Text {
+                text: c.l; fontSize: 15; maxLines: 1; radius: 20; padding: [16, 10]
+                background: city == c.v ? accent : mix(surface, accent, 0.22)
+                color: city == c.v ? background : foreground
+                onTap: { city = c.v; sheet = ""; refresh() }
+              }
+            }
+          }
+          Row {
+            gap: 8
+            align: center
+            Spacer { weight: 1 }
+            Text { text: L.cancel; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: sheet = "" }
+            Text {
+              text: L.save; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+              onTap: { city = len(typedCity) > 0 ? typedCity : city; sheet = ""; refresh() }
+            }
+          }
+        }
+      }
+    }
+
+    // The other settings: one choice each, taken as it's tapped.
+    if sheet != "" && sheet != "city" {
+      Sheet {
+        title: sheet == "method" ? L.method : sheet == "school" ? L.school : sheet == "tune" ? L.tune : L.language
+        onDismiss: sheet = ""
+        for o in options key o.v {
+          Row {
+            gap: 16
+            align: center
+            padding: [0, 12]
+            onTap: {
+              if sheet == "method" {
+                method = o.v
+              } else if sheet == "school" {
+                school = o.v
+              } else if sheet == "tune" {
+                tuneMin = o.v
+              } else {
+                lang = o.v
+              }
+              sheet = ""
+              refresh()
+            }
+            Box {
+              size: 20; radius: 10; align: center; border: 2; borderColor: o.v == chosen ? accent : muted
+              Spacer { size: 10; radius: 5; background: o.v == chosen ? accent : alpha(accent, 0) }
+            }
+            Text { text: o.l; fontSize: 16; weight: 1; maxLines: 1 }
           }
         }
       }

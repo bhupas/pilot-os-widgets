@@ -1,8 +1,8 @@
 widget "ifsc" {
   meta {
-    owl: 5
+    owl: 8
     description: "IFSC Climbing World Cup: the next event with a countdown, the latest podiums, live results and the cup standings for boulder, lead and speed. Tap for everything"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -76,12 +76,14 @@ widget "ifsc" {
   let results = latest.results ?? []
   let standings = cup ?? []
   let wide = (tileWidth ?? 0) >= 300
-  // Lines below the divider: the latest winners first, then cup leaders if 2+ fit.
-  let slots = max(2, (rows ?? 4) * 2 - 1)
+  let wideScreen = (screenWidth ?? 0) > 600
+  // Lines under the lead: the latest winners first, then cup leaders if 2+ fit.
+  let slots = max(0, (rows ?? 4) * 3 - 7)
   let shown = results.take(slots)
   let spare = slots - count(shown) - 1
   let leaders = spare >= 2 ? standings.take(spare) : []
-
+  // The event the tile and the app lead with: the live one, else the next.
+  let lead = live ? latest : next
 
   component Until(t, tint = foreground, fs = 12) {
     Text {
@@ -102,20 +104,21 @@ widget "ifsc" {
     Row {
       gap: 4
       for k in list ?? [] {
-        Text { text: k; style: label; width: len(k) * 7 + 14; align: center; color: (k == "boulder" ? yellow : k == "lead" ? blue : k == "speed" ? red : accent); padding: [5, 1]; border: 1; borderColor: alpha((k == "boulder" ? yellow : k == "lead" ? blue : k == "speed" ? red : accent), 0.5) }
+        Text { text: k; style: label; width: len(k) * 7 + 14; align: center; maxLines: 1; color: (k == "boulder" ? yellow : k == "lead" ? blue : k == "speed" ? red : accent); padding: [5, 1]; radius: 8; border: 1; borderColor: alpha((k == "boulder" ? yellow : k == "lead" ? blue : k == "speed" ? red : accent), 0.5) }
       }
     }
   }
 
   component Athlete(a, showScore = true) {
     Row {
-      gap: 6
+      gap: 12
       align: center
-      Text { text: a.rank; width: 18; style: small; align: end; bold: a.rank <= 3; color: a.rank == 1 ? yellow : a.rank == 2 ? foreground : a.rank == 3 ? orange : muted }
-      Flag { code: a.country }
-      Text { text: a.name; style: small; weight: 1; maxLines: 1 }
+      padding: [20, 12]
+      Text { text: a.rank; width: 22; fontSize: 15; align: end; bold: a.rank <= 3; color: a.rank == 1 ? yellow : a.rank == 2 ? foreground : a.rank == 3 ? orange : muted; maxLines: 1 }
+      Flag { code: a.country; px: 16 }
+      Text { text: a.name; fontSize: 16; weight: 1; maxLines: 1 }
       if showScore {
-        Text { text: a.score ?? ""; style: small; width: 64; align: end; color: muted; maxLines: 1 }
+        Text { text: a.score ?? ""; fontSize: 14; width: 72; align: end; color: muted; maxLines: 1 }
       }
     }
   }
@@ -140,20 +143,21 @@ widget "ifsc" {
 
   component EventRow(e) {
     Row {
-      gap: 8
+      gap: 12
       align: center
-      Box { width: 3; height: 30; radius: 1.5; background: e.state == "live" ? accent : e.state == "next" ? alpha(foreground, 0.6) : alpha(muted, 0.4) }
+      padding: [20, 14]
+      Box { width: 4; height: 36; radius: 2; background: e.state == "live" ? accent : e.state == "next" ? alpha(foreground, 0.6) : alpha(muted, 0.4) }
       Column {
-        gap: 0
+        gap: 2
         weight: 1
-        Text { text: e.name; style: body; maxLines: 1; color: e.state == "done" ? muted : foreground }
-        Text { text: e.dates; style: small; color: muted; maxLines: 1 }
+        Text { text: e.name; fontSize: 16; maxLines: 1; color: e.state == "done" ? muted : foreground }
+        Text { text: e.dates; fontSize: 14; color: muted; maxLines: 1 }
       }
       Kinds { list: e.kinds }
       if e.state == "next" {
-        Until { t: e.start }
+        Until { t: e.start; fs: 14 }
       } else {
-        Text { text: e.state == "live" ? "live" : "✓"; style: small; width: 64; align: end; color: e.state == "live" ? accent : muted }
+        Text { text: e.state == "live" ? "Live" : "✓"; fontSize: 14; width: 64; align: end; color: e.state == "live" ? accent : muted; maxLines: 1 }
       }
     }
   }
@@ -161,114 +165,181 @@ widget "ifsc" {
   onTap: screen()
 
   Column {
-    gap: 6
+    gap: 2
+    fill: true
     Row {
       align: center
-      Text { text: "IFSC World Cup"; style: title; weight: 1; maxLines: 1 }
-      Text { text: live ? "● live" : info.season ?? ""; style: small; width: 60; align: end; color: live ? accent : muted; bold: live }
+      Text { text: "IFSC"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: live ? "● LIVE" : info.season ?? ""; style: label; width: 60; align: end; color: live ? accent : muted; bold: live; maxLines: 1 }
     }
 
-    // The next event (or the live one) up top.
-    if live {
+    // The live event, or the next one, big.
+    if lead != null {
       Row {
-        gap: 8; align: center
-        Text { text: latest.name; style: body; weight: 1; maxLines: 1; color: accent }
-        Kinds { list: latest.kinds }
+        gap: 8
+        align: center
+        Text { text: lead.name; fontSize: wide ? 40 : 30; color: live ? accent : foreground; weight: 1; maxLines: 1 }
+        if wide { Kinds { list: lead.kinds } }
       }
-    } else if next != null {
       Row {
-        gap: 8; align: center
-        Column {
-          gap: 0; weight: 1
-          Text { text: "next · ${next.name}"; style: body; maxLines: 1 }
-          Text { text: next.dates; style: small; color: muted; maxLines: 1 }
-        }
-        if wide { Kinds { list: next.kinds } }
-        Until { t: next.start; tint: accent; fs: 15 }
+        gap: 8
+        align: center
+        Text { text: live ? "Live · ${lead.dates}" : "Next · ${lead.dates}"; style: small; color: live ? accent : muted; weight: 1; maxLines: 1 }
+        if !live { Until { t: lead.start; tint: accent } }
       }
-    } else if info != null {
-      Text { text: "season over"; style: small; color: muted }
+    } else {
+      Text { text: info == null ? null : "Season over"; fontSize: 30; maxLines: 1 }
+      Text { text: info.season ?? ""; style: small; color: muted; maxLines: 1 }
     }
+    Spacer { weight: 1 }
 
-    Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-
-    if latest != null {
-      Text { text: "${live ? "now" : "last"} · ${latest.name}"; style: label; color: muted; maxLines: 1 }
+    // Then the latest winners and cup leaders, as many as fit.
+    if latest != null && count(shown) > 0 {
+      Text { text: upper("${live ? "now" : "last"} · ${latest.name}"); style: label; color: muted; maxLines: 1 }
       Column {
         gap: 3
         for c in shown { Winner { c: c } }
       }
       if count(leaders) > 0 {
         Spacer { height: 4 }
-        Text { text: "cup leaders"; style: label; color: muted; maxLines: 1 }
+        Text { text: "CUP LEADERS"; style: label; color: muted; maxLines: 1 }
         Column {
           gap: 3
           for c in leaders { Winner { c: c } }
         }
       }
-    } else {
-      Text { text: info == null ? "loading…" : "no results yet"; style: small; color: muted }
+    }
+  }
+
+  // The latest event's results, a card per category.
+  component Results() {
+    Column {
+      gap: 12
+      if latest == null {
+        Text { text: info == null ? "Loading…" : "No results yet."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+      } else {
+        Column {
+          gap: 0
+          padding: [4, 8, 0, 0]
+          Text { text: latest.full; fontSize: 20; bold: true; maxLines: 2 }
+          Text { text: (live ? "Live · " : "") + latest.dates; fontSize: 14; color: live ? accent : muted; maxLines: 1 }
+        }
+        for c in results {
+          Row {
+            align: center
+            gap: 8
+            padding: [4, 8, 0, 0]
+            Text { text: "${upper(sub(c.name, 0, 1))}${lower(sub(c.name, 1))}"; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+            Text { text: c.status == "finished" ? "Final" : (c.round ?? c.status); fontSize: 14; color: c.status == "finished" ? muted : accent; maxLines: 1 }
+          }
+          Column {
+            gap: 0
+            background: surface
+            radius: 28
+            clip: true
+            for a, i in c.top key a.name {
+              Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+              Athlete { a: a }
+            }
+          }
+        }
+        Text { text: "Full results"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: url("https://ifsc.results.info/event/${latest.id}") }
+      }
+    }
+  }
+
+  // The cup standings, one category at a time, picked with chips.
+  component Standings() {
+    Column {
+      gap: 12
+      Flow {
+        gap: 8
+        for s, i in standings {
+          Text { text: s.short; fontSize: 14; maxLines: 1; radius: 16; padding: [14, 8]; background: pick == i ? mix(surface, accent, 0.22) : surface; color: pick == i ? (s.kind == "boulder" ? yellow : s.kind == "lead" ? blue : s.kind == "speed" ? red : accent) : foreground; onTap: pick = i }
+        }
+      }
+      let s = standings[pick]
+      if s == null {
+        Text { text: cup == null ? "Loading…" : "No standings yet."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+      } else {
+        Text { text: "${upper(sub(s.name, 0, 1))}${lower(sub(s.name, 1))}"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0]; maxLines: 1 }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for a, i in s.top key a.name {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+            Athlete { a: a }
+          }
+        }
+      }
+    }
+  }
+
+  // The season's events, in order.
+  component Calendar() {
+    Column {
+      gap: 12
+      Text { text: "Season ${info.season ?? ''}"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for e, i in events key e.id {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          EventRow { e: e }
+        }
+        if count(events) == 0 {
+          Text { text: info == null ? "Loading…" : "No events yet."; fontSize: 16; color: muted; padding: [20, 16] }
+        }
+      }
     }
   }
 
   screen {
     title: "IFSC World Cup ${info.season ?? ''}"
     Column {
-      gap: 10
-      Row {
-        gap: 6
-        Button { text: live ? "live" : "results"; weight: 1; color: tab == "results" ? accent : muted; onTap: tab = "results" }
-        Button { text: "standings"; weight: 1; color: tab == "cup" ? accent : muted; onTap: { tab = "cup"; pick = 0 } }
-        Button { text: "calendar"; weight: 1; color: tab == "calendar" ? accent : muted; onTap: tab = "calendar" }
-      }
-
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      // The live event, or the next one, big.
       Column {
-        weight: 1
-        scroll: true
-        gap: 6
-
-        if tab == "results" {
-          if latest == null {
-            Text { text: "no results yet"; style: small; color: muted }
-          } else {
-            Text { text: latest.full; style: title; maxLines: 2 }
-            Row {
-              gap: 8; align: center
-              Text { text: latest.dates; style: small; color: muted; weight: 1 }
-              if live { Text { text: "● live"; style: small; color: accent; bold: true; width: 60; align: end } }
-            }
-            for c in results {
-              Spacer { height: 6 }
-              Row {
-                align: center
-                Text { text: lower(c.name); style: label; color: (c.kind == "boulder" ? yellow : c.kind == "lead" ? blue : c.kind == "speed" ? red : accent); weight: 1 }
-                Text { text: c.status == "finished" ? "final" : (c.round ?? c.status); style: small; color: c.status == "finished" ? muted : accent; width: 110; align: end; maxLines: 1 }
-              }
-              for a in c.top key a.name { Athlete { a: a } }
-            }
-            Spacer { height: 6 }
-            Button { text: "full results on ifsc.results.info"; onTap: url("https://ifsc.results.info/event/${latest.id}") }
-          }
-        } else if tab == "cup" {
-          Flow {
-            gap: 6
-            for s, i in standings {
-              Button { text: s.short; color: pick == i ? (s.kind == "boulder" ? yellow : s.kind == "lead" ? blue : s.kind == "speed" ? red : accent) : muted; onTap: pick = i }
-            }
-          }
-          let s = standings[pick]
-          if s == null {
-            Text { text: cup == null ? "loading…" : "no standings yet"; style: small; color: muted }
-          } else {
-            Text { text: lower(s.name); style: title; color: (s.kind == "boulder" ? yellow : s.kind == "lead" ? blue : s.kind == "speed" ? red : accent) }
-            for a in s.top key a.name { Athlete { a: a } }
-          }
-        } else {
-          for e in events key e.id { EventRow { e: e } }
+        gap: 0
+        Text { text: lead != null ? lead.name : info == null ? "…" : "Season over"; fontSize: 48; bold: true; color: live ? accent : foreground; maxLines: 2 }
+        Text {
+          text: lead == null ? "No more events this season" : live ? "Live now · ${lead.dates}" : "${lead.start - now > 86400 ? "In ${ceil((lead.start - now) / 86400)} days" : "In ${fmtDuration(max(lead.start - now, 0))}"} · ${lead.dates}"
+          fontSize: 16; color: live ? accent : muted; maxLines: 1
         }
       }
-
-      Button { text: "close"; onTap: close() }
+      if wideScreen {
+        Row {
+          gap: 24
+          align: top
+          Results { weight: 1 }
+          Column {
+            gap: 12
+            weight: 1
+            Standings { }
+            Calendar { }
+          }
+        }
+      } else {
+        Row {
+          gap: 8
+          for v in [["results", live ? "Live" : "Results"], ["cup", "Standings"], ["calendar", "Calendar"]] {
+            Text { text: v[1]; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: tab == v[0] ? mix(surface, accent, 0.22) : transparent; color: tab == v[0] ? foreground : muted; onTap: { tab = v[0]; pick = v[0] == "cup" ? 0 : pick } }
+          }
+        }
+        if tab == "results" {
+          Results { }
+        } else if tab == "cup" {
+          Standings { }
+        } else {
+          Calendar { }
+        }
+      }
     }
   }
 }

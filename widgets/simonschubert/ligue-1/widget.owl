@@ -1,8 +1,8 @@
 widget "ligue-1" {
   meta {
-    owl: 5
+    owl: 8
     description: "Ligue 1 results, live scores and kick-offs from ESPN with club crests, and the table with European and relegation places. Tap for every match"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -54,16 +54,33 @@ widget "ligue-1" {
   """) every 30m json timeout 120s
   source now = clock every 1m
 
+
   state view = "matches"
 
   let all = games ?? []
   let live = all.filter(g => g.state == 'in')
   let done = all.filter(g => g.state == 'post').reverse()
   let next = all.filter(g => g.state == 'pre')
-  let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
-  let picked = flatten([live, done.take(ceil(cap / 2)), next]).take(cap)
   let groups = table ?? []
-  let wide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
+  let today = fmtTime(now, "yyyy-MM-dd")
+
+  // The match that matters now, big on the tile and the screen: one being played, else the next kick-off, else the
+  // last result.
+  let top = live[0] ?? next[0] ?? done[0]
+  let topHome = top == null ? null : top.teams.find(t => t.side == 'home') ?? top.teams[0]
+  let topAway = top == null ? null : top.teams.find(t => t.side == 'away') ?? top.teams[1]
+  let topValue = top == null ? (games == null ? null : "–") : top.state == 'pre' ? fmtTime(top.at, "HH:mm") : "${topHome.score ?? '–'}–${topAway.score ?? '–'}"
+  let topLine = top == null ? (games == null ? "Loading matches" : "No matches this week") : "${topHome.name} v ${topAway.name} · " + (top.state == 'pre' ? (fmtTime(top.at, "yyyy-MM-dd") == today ? "Today" : fmtTime(top.at, "EEE d MMM")) : top.detail)
+
+  // The tile's other matches, as many as fit under the big one: what's live, the latest results, then what's next.
+  let short = (rows ?? 4) < 3
+  let fits = short ? 0 : max(floor(((tileHeight ?? 256) - 116) / 22), 0)
+  let rest = flatten([live, done.take(ceil(fits / 2)), next]).filter(g => g.id != top.id).take(fits)
+  let wideTile = (tileWidth ?? 0) >= 280
+
+  // The screen's matches, a card a day.
+  let days = unique(all.map(g => fmtTime(g.at, "yyyy-MM-dd")))
+  let twoColumns = (screenWidth ?? 0) > 600
 
   component Crest(logo, px = 18) {
     if logo {
@@ -73,86 +90,142 @@ widget "ligue-1" {
     }
   }
 
-  component GameRow(g) {
+  // A match: home on the left, as football lists it; the centre keeps one width so the crests and names line up
+  // down the list. `wide` shows full names, `fs` is the text size.
+  component GameRow(g, wide = false, fs = 12) {
     let away = g.teams.find(t => t.side == 'away') ?? g.teams[1]
     let home = g.teams.find(t => t.side == 'home') ?? g.teams[0]
     let live = g.state == 'in'
     let final = g.state == 'post'
-    let px = wide ? 18 : 14
-    let scW = wide ? 24 : 18
+    let px = wide ? fs + 6 : 14
+    let scW = wide ? fs * 1.8 : 18
     let dotW = wide ? 8 : 6
-    let stW = wide ? 72 : 34
+    let stW = wide ? fs * 5 : 34
     let ctrW = 2 * scW + 2 * dotW + stW
 
-    // Home on the left, as football lists it; the centre keeps one width so the
-    // crests and names line up down the list.
     Row {
       gap: wide ? 8 : 4
+      align: center
       Crest { logo: home.logo; px: px }
-      Text { text: wide ? home.name : home.abbr; style: small; weight: 1; maxLines: 1; color: final && away.winner ? muted : foreground }
+      Text { text: wide ? home.name : home.abbr; fontSize: fs; weight: 1; maxLines: 1; color: final && away.winner ? muted : foreground }
       if g.state == 'pre' {
-        Text { text: fmtTime(g.at, wide ? "EEE HH:mm" : "HH:mm"); style: small; width: ctrW; align: center; color: muted; maxLines: 1 }
+        Text { text: fmtTime(g.at, wide ? "EEE HH:mm" : "HH:mm"); fontSize: fs; width: ctrW; align: center; color: muted; maxLines: 1 }
       } else {
         Row {
           width: ctrW; gap: 0; align: center
-          Text { text: home.score ?? '–'; style: small; width: scW; align: end; bold: final && home.winner; color: live ? accent : final && away.winner ? muted : foreground }
-          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : rgb(0, 0, 0, 0) }
-          Text { text: g.detail; style: small; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
+          Text { text: home.score ?? '–'; fontSize: fs; width: scW; align: end; maxLines: 1; bold: final && home.winner; color: live ? accent : final && away.winner ? muted : foreground }
+          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : alpha(accent, 0) }
+          Text { text: g.detail; fontSize: fs - 1; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
           Box { width: dotW }
-          Text { text: away.score ?? '–'; style: small; width: scW; align: start; bold: final && away.winner; color: live ? accent : final && home.winner ? muted : foreground }
+          Text { text: away.score ?? '–'; fontSize: fs; width: scW; align: start; maxLines: 1; bold: final && away.winner; color: live ? accent : final && home.winner ? muted : foreground }
         }
       }
-      Text { text: wide ? away.name : away.abbr; style: small; weight: 1; maxLines: 1; align: end; color: final && home.winner ? muted : foreground }
+      Text { text: wide ? away.name : away.abbr; fontSize: fs; weight: 1; maxLines: 1; align: end; color: final && home.winner ? muted : foreground }
       Crest { logo: away.logo; px: px }
     }
   }
 
-  component TeamRow(t, full = false) {
-    let zc = t.zone == 'green' ? green : t.zone == 'blue' ? blue : t.zone == 'orange' ? orange : t.zone == 'red' ? red : rgb(0, 0, 0, 0)
+  // A club in the table: its zone's colour (European places, relegation), rank, crest, name, record, goal
+  // difference and points.
+  component TeamRow(t) {
+    let zc = t.zone == 'green' ? green : t.zone == 'blue' ? blue : t.zone == 'orange' ? orange : t.zone == 'red' ? red : alpha(accent, 0)
     Row {
-      gap: 6
-      Box { width: 3; height: 14; radius: 1.5; background: zc }
-      Text { text: t.rank; width: 20; style: small; color: muted; align: end }
-      Crest { logo: t.logo; px: 16 }
-      Text { text: wide ? t.name : t.abbr; weight: 1; style: small; maxLines: 1 }
-      if full {
-        Text { text: "${t.won}-${t.drawn}-${t.lost}"; width: 56; style: small; color: muted; align: end }
-      } else if wide {
-        Text { text: t.played; width: 24; style: small; color: muted; align: end }
+      gap: 8
+      align: center
+      padding: [16, 10]
+      Box { width: 3; height: 18; radius: 1.5; background: zc }
+      Text { text: t.rank; width: 22; fontSize: 14; color: muted; align: end; maxLines: 1 }
+      Crest { logo: t.logo; px: 20 }
+      Text { text: t.name; weight: 1; fontSize: 15; maxLines: 1 }
+      Text { text: "${t.won}-${t.drawn}-${t.lost}"; width: 64; fontSize: 14; font: mono; color: muted; align: end; maxLines: 1 }
+      Text { text: t.gd > 0 ? "+${t.gd}" : t.gd; width: 36; fontSize: 14; font: mono; align: end; maxLines: 1; color: t.gd > 0 ? green : t.gd < 0 ? red : muted }
+      Text { text: t.pts; width: 30; fontSize: 15; font: mono; bold: true; align: end; maxLines: 1 }
+    }
+  }
+
+  component Matches() {
+    Column {
+      gap: 12
+      if len(all) == 0 { Text { text: games == null ? "Loading…" : "No matches this week."; fontSize: 16; color: muted; padding: [4, 8] } }
+      for d in days key d {
+        Text { text: d == today ? "Today" : fmtTime(all.find(g => fmtTime(g.at, "yyyy-MM-dd") == d).at, "EEEE d MMMM"); fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for g, i in all.filter(g => fmtTime(g.at, "yyyy-MM-dd") == d) key g.id {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+            Box { padding: [16, 14]; GameRow { g: g; wide: true; fs: 15 } }
+          }
+        }
       }
-      Text { text: t.gd > 0 ? "+${t.gd}" : t.gd; width: 32; style: small; align: end; color: t.gd > 0 ? green : t.gd < 0 ? red : muted }
-      Text { text: t.pts; width: 28; style: small; bold: true; align: end }
+    }
+  }
+
+  component Table() {
+    Column {
+      gap: 12
+      if len(groups) == 0 { Text { text: table == null ? "Loading…" : "No table yet."; fontSize: 16; color: muted; padding: [4, 8] } }
+      for grp in groups {
+        Text { text: grp.name; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Row {
+            gap: 8
+            padding: [16, 12, 16, 4]
+            // Lines up with the names, past the zone, rank and crest.
+            Spacer { width: 61 }
+            Text { text: "Club"; style: label; color: muted; weight: 1; maxLines: 1 }
+            Text { text: "W-D-L"; style: label; color: muted; width: 64; align: end; maxLines: 1 }
+            Text { text: "GD"; style: label; color: muted; width: 36; align: end; maxLines: 1 }
+            Text { text: "Pts"; style: label; color: muted; width: 30; align: end; maxLines: 1 }
+          }
+          for t, i in grp.teams key t.id {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+            TeamRow { t: t }
+          }
+        }
+      }
+      // What the zone colours mean.
+      if len(groups) > 0 {
+        Column {
+          gap: 6
+          padding: [8, 4, 0, 0]
+          for z in [{c: green, name: "Champions League"}, {c: blue, name: "Europe"}, {c: orange, name: "Relegation play-off"}, {c: red, name: "Relegation"}] {
+            Row {
+              gap: 8
+              align: center
+              Box { width: 3; height: 14; radius: 1.5; background: z.c }
+              Text { text: z.name; fontSize: 13; color: muted; weight: 1; maxLines: 1 }
+            }
+          }
+        }
+      }
     }
   }
 
   onTap: screen()
 
+  // The tile: the match that matters now, big, then as many others as fit.
   Column {
+    gap: 2
+    fill: true
     Row {
-      Text { text: "Ligue 1"; style: title; weight: 1; maxLines: 1 }
-      if count(live) > 0 {
-        Text { text: "${count(live)} live"; style: small; color: accent; width: 60; align: end; bold: true }
-      } else {
-        Text { text: fmtTime(now, "EEE d"); style: small; color: muted; width: 60; align: end }
-      }
+      align: center
+      Text { text: "LIGUE 1"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: len(live) > 0 ? "${len(live)} LIVE" : upper(fmtTime(now, "EEE d")); style: label; color: len(live) > 0 ? accent : muted; maxLines: 1 }
     }
-    Row {
-      Button { text: "matches"; weight: 1; color: view == "matches" ? accent : muted; onTap: view = "matches" }
-      Button { text: "table"; weight: 1; color: view == "table" ? accent : muted; onTap: view = "table" }
-    }
-    Column {
-      weight: 1
-      scroll: true
-      if view == "matches" {
-        if count(picked) == 0 {
-          Text { text: games == null ? "loading…" : "no matches this week"; style: small; color: muted }
-        } else {
-          for g in picked key g.id { GameRow { g: g } }
-        }
-      } else {
-        for grp in groups {
-          for t in grp.teams key t.id { TeamRow { t: t } }
-        }
+    Text { text: topValue; fontSize: 40; maxLines: 1; color: top.state == 'in' ? accent : foreground }
+    Text { text: topLine; style: small; color: muted; maxLines: 1 }
+    if len(rest) > 0 {
+      Spacer { height: 6 }
+      Column {
+        gap: 6
+        for g in rest key g.id { GameRow { g: g; wide: wideTile; fs: 12 } }
       }
     }
   }
@@ -161,14 +234,33 @@ widget "ligue-1" {
     title: "Ligue 1"
     Column {
       scroll: true
-      Text { text: "matches"; style: title }
-      if count(all) == 0 { Text { text: "no matches this week"; style: small; color: muted } }
-      for g in all key g.id { GameRow { g: g } }
-      Text { text: "table"; style: title }
-      for grp in groups {
-        for t in grp.teams key t.id { TeamRow { t: t; full: true } }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: topValue; fontSize: 48; bold: true; maxLines: 1; color: top.state == 'in' ? accent : foreground }
+        Text { text: topLine; fontSize: 16; color: muted; maxLines: 2 }
       }
-      Button { text: "close"; onTap: close() }
+      if twoColumns {
+        Row {
+          gap: 24
+          Matches { weight: 1 }
+          Table { weight: 1 }
+        }
+      } else {
+        // Matches or the table, as tabs.
+        Row {
+          gap: 8
+          Text { text: "Matches"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: view == "matches" ? mix(surface, accent, 0.22) : surface; bold: view == "matches"; onTap: view = "matches" }
+          Text { text: "Table"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: view == "table" ? mix(surface, accent, 0.22) : surface; bold: view == "table"; onTap: view = "table" }
+        }
+        if view == "matches" {
+          Matches { }
+        } else {
+          Table { }
+        }
+      }
+      Text { text: "Scores and the table from ESPN, every 5 and 30 minutes."; fontSize: 14; color: muted; padding: [8, 0] }
     }
   }
 }

@@ -1,11 +1,14 @@
 widget "sun and moon" {
-  meta { description: "Sunrise, sunset, daylight left and tonight's moon phase, located by IP or a city you type, via wttr.in"; version: "1.2"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Sunrise, sunset, daylight left and tonight's moon phase, located by IP or a city you type, via wttr.in"; version: "1.3"; license: "MIT"; category: "world"; owl: 9 }
   size: 3x3
   minSize: 3x3
 
   requires { pacman: ["curl", "jq"] }
 
   state city = "" persist
+  // The city form, open, and what's typed in it.
+  state editing = false
+  state draft = ""
   // The city, percent-encoded so it can't break the URL or the shell's single quotes. Empty means located by IP.
   let q = city.replace("%", "%25").replace("+", "%2B").replace("/", "%2F").replace("?", "%3F").replace("#", "%23").replace("&", "%26").replace("'", "%27").replace(" ", "+")
   // wttr.in gives local clock times ("07:14 AM"); date turns them into Unix time for today and tomorrow.
@@ -23,19 +26,16 @@ widget "sun and moon" {
   let day = now >= sky.rise && now < sky.set
   let p = clamp((now - sky.rise) / (sky.set - sky.rise), 0, 1)
   let waxing = contains(sky.phase, "Waxing") || contains(sky.phase, "First")
+  // The next sunrise: today's before it, tomorrow's after sunset.
+  let rise = now < sky.rise ? sky.rise : sky.next
+  let left = sky == null ? null : day ? fmtDuration(sky.set - now) : fmtDuration(rise - now)
+  let wide = (screenWidth ?? 0) > 600
 
   onTap: screen()
 
-  Column {
-    gap: 4
-    Row {
-      Text { text: "sun & moon"; style: muted; weight: 1 }
-      Text { text: sky.place; fontSize: 10; color: muted; maxLines: 1; width: 72; align: end }
-    }
-    // The day as an arc from sunrise (left) to sunset (right).
+  // The day as an arc from sunrise (left) to sunset (right).
+  component Arc() {
     Canvas {
-      weight: 1
-      fill: width
       let cx = width / 2
       let cy = height - 4
       let r = min(width / 2 - 8, height - 12)
@@ -45,38 +45,153 @@ widget "sun and moon" {
       if day { arc(cx, cy, r, -90, 180 * p, stroke: yellow, width: 3, cap: round) }
       circle(cx + r * sin(a), cy - r * cos(a), day ? 7 : 5, fill: day ? yellow : muted)
     }
+  }
+
+  // Lit part of the moon: the limb on one side, the terminator (an ellipse) on the other.
+  component Moon(px) {
+    Canvas {
+      size: px
+      let r = px / 2 - 1
+      let c = px / 2
+      let s = waxing ? 1 : -1
+      let f = num(sky.illum, 0) / 100
+      let ys = range(21).map(i => -r + 2 * r * i / 20)
+      circle(c, c, r, fill: surface, stroke: border, width: 1)
+      path(ys.map(y => [c + s * sqrt(max(r * r - y * y, 0)), c + y]) + reverse(ys).map(y => [c + s * sqrt(max(r * r - y * y, 0)) * (1 - 2 * f), c + y]), closed: true, fill: foreground)
+    }
+  }
+
+  component Item(label, value) {
     Row {
-      Text { text: "↑ ${fmtTime(now < sky.set ? sky.rise : sky.next, "HH:mm")}"; fontSize: 12; weight: 1 }
-      Text { text: "↓ ${fmtTime(sky.set, "HH:mm")}"; fontSize: 12; width: 56; align: end }
+      gap: 16
+      align: center
+      padding: [20, 16]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: muted; align: end; weight: 1; maxLines: 1 }
     }
-    Text {
-      text: now < sky.rise ? "sunrise in ${fmtDuration(sky.rise - now)}" : day ? "${fmtDuration(sky.set - now)} of daylight left" : "sunrise in ${fmtDuration(sky.next - now)}"
-      style: small; color: muted; maxLines: 1
-    }
+  }
+
+  // The tile: the next sunset (or sunrise) big, the time left, the day's arc and tonight's moon.
+  Column {
+    gap: 2
+    fill: true
     Row {
       align: center
-      // Lit part of the moon: the limb on one side, the terminator (an ellipse) on the other.
-      Canvas {
-        size: 22
-        let r = 10
-        let c = 11
-        let s = waxing ? 1 : -1
-        let f = num(sky.illum, 0) / 100
-        let ys = range(21).map(i => -r + 2 * r * i / 20)
-        circle(c, c, r, fill: surface, stroke: border, width: 1)
-        path(ys.map(y => [c + s * sqrt(max(r * r - y * y, 0)), c + y]) + reverse(ys).map(y => [c + s * sqrt(max(r * r - y * y, 0)) * (1 - 2 * f), c + y]), closed: true, fill: foreground)
+      Text { text: "SUN"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: upper(sky.place ?? ""); style: label; color: accent; maxLines: 1; width: 80; align: end }
+    }
+    Text { text: sky == null ? null : day ? "↓ ${fmtTime(sky.set, "HH:mm")}" : "↑ ${fmtTime(rise, "HH:mm")}"; fontSize: 32; maxLines: 1 }
+    Text { text: sky == null ? "Loading…" : day ? "${left} of daylight left" : "Sunrise in ${left}"; style: small; color: muted; maxLines: 1 }
+    Arc { weight: 1; fill: width }
+    Row {
+      gap: 8
+      align: center
+      Moon { px: 18 }
+      Text { text: sky == null ? "…" : "${sky.phase} · ${sky.illum}%"; style: small; color: muted; maxLines: 1; weight: 1 }
+    }
+  }
+
+  component Today() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: left; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: sky == null ? "Loading…" : (day ? "Of daylight left" : "Until sunrise") + " · ${sky.place}"; fontSize: 16; color: muted; maxLines: 1 }
       }
-      Text { text: "${lower(sky.phase)} · ${sky.illum}%"; fontSize: 11; maxLines: 1; weight: 1 }
+      Column {
+        background: surface; radius: 28; padding: [20, 16]
+        Arc { height: 140; fill: width }
+      }
+    }
+  }
+
+  component Details() {
+    Column {
+      gap: 12
+      Text { text: "Sun"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        Item { label: "Sunrise"; value: sky == null ? null : fmtTime(sky.rise, "HH:mm") }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Sunset"; value: sky == null ? null : fmtTime(sky.set, "HH:mm") }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Daylight"; value: sky == null ? null : fmtDuration(sky.set - sky.rise) }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Sunrise tomorrow"; value: sky == null ? null : fmtTime(sky.next, "HH:mm") }
+      }
+      Text { text: "Moon"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Row {
+        gap: 16
+        align: center
+        padding: [20, 16]
+        background: surface; radius: 28
+        Moon { px: 40 }
+        Column {
+          gap: 0
+          weight: 1
+          Text { text: sky.phase; fontSize: 16; maxLines: 1 }
+          Text { text: sky == null ? "…" : "${sky.illum}% lit"; fontSize: 14; color: muted; maxLines: 1 }
+        }
+      }
+      Text { text: "Place"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Row {
+        gap: 12
+        align: center
+        padding: [20, 16]
+        background: surface; radius: 28
+        onTap: { draft = city; editing = true }
+        Text { text: "City"; fontSize: 16; weight: 1; maxLines: 1 }
+        Text { text: city == "" ? "Located by IP" : city; fontSize: 16; color: city == "" ? muted : accent; maxLines: 1 }
+        Text { text: "›"; fontSize: 18; color: muted }
+      }
     }
   }
 
   screen {
     title: "sun and moon"
-    Input {
-      text: city
-      placeholder: "city · empty = auto"
-      onSubmit: { city = trim(value); refresh() }
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          Today { weight: 1 }
+          Details { weight: 1 }
+        }
+      } else {
+        Today { }
+        Details { }
+      }
     }
-    Text { text: sky == null ? "…" : lower(sky.place); style: small; color: muted }
+
+    // The city, typed; empty finds the place by IP.
+    if editing {
+      Sheet {
+        title: "City"
+        onDismiss: editing = false
+        Column {
+          gap: 16
+          padding: [0, 4, 0, 4]
+          Input {
+            text: draft
+            placeholder: "A city, or empty for where you are"
+            focus: editing
+            onChange: draft = value
+            onSubmit: { city = trim(value); editing = false; refresh() }
+          }
+          Row {
+            gap: 8
+            align: center
+            Text { text: "Use my location"; fontSize: 15; color: accent; maxLines: 1; padding: [8, 12]; onTap: { city = ""; editing = false; refresh() } }
+            Spacer { weight: 1 }
+            Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = false }
+            Text { text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { city = trim(draft); editing = false; refresh() } }
+          }
+        }
+      }
+    }
   }
 }

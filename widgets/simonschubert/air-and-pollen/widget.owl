@@ -1,5 +1,5 @@
 widget "air and pollen" {
-  meta { description: "Air quality and today's pollen where you are, from Open-Meteo (Copernicus), located by IP or a city you type, via wttr.in. Tap it for the next 24 hours, pollutants and every pollen type"; version: "1.1"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Air quality and today's pollen where you are, from Open-Meteo (Copernicus), located by IP or a city you type, via wttr.in. Tap it for the next 24 hours, pollutants and every pollen type"; version: "1.2"; license: "MIT"; category: "world"; owl: 9 }
   size: 3x2
   minSize: 3x2
 
@@ -25,9 +25,9 @@ widget "air and pollen" {
   let index = us ? "us_aqi" : "european_aqi"
   let aqi = get(cur, index)
   let steps = us ? [50, 100, 150, 200, 300] : [20, 40, 60, 80, 100]
-  let names = us ? ["good", "moderate", "unhealthy for some", "unhealthy", "very unhealthy", "hazardous"] : ["good", "fair", "moderate", "poor", "very poor", "extremely poor"]
+  let names = us ? ["Good", "Moderate", "Unhealthy for some", "Unhealthy", "Very unhealthy", "Hazardous"] : ["Good", "Fair", "Moderate", "Poor", "Very poor", "Extremely poor"]
   let tints = us ? [green, yellow, orange, red, magenta, magenta] : [green, cyan, yellow, orange, red, magenta]
-  let advice = ["ideal for being outside", "fine for your usual outdoor plans", "sensitive people may want to take it easy outside", "consider less intense activity outside", "cut down on activity outside", "avoid activity outside"]
+  let advice = ["Ideal for being outside", "Fine for your usual outdoor plans", "Sensitive people may want to take it easy outside", "Consider less intense activity outside", "Cut down on activity outside", "Avoid activity outside"]
   let level = aqi == null ? null : count(steps, s => aqi > s)
   let tint = level == null ? muted : tints[level]
   // The next 24 hours, from the current one on.
@@ -47,9 +47,17 @@ widget "air and pollen" {
   }).map(p => {name: p.name, values: p.values, peak: p.peak, level: p.peak == null ? 0 : count(p.t, x => p.peak >= x)})
   let hasPollen = any(pollen, p => p.peak != null)
   let flying = pollen.filter(p => p.level > 0).sortBy(p => -p.peak)
-  let pollenWords = ["none", "low", "moderate", "high"]
+  let pollenWords = ["None", "Low", "Moderate", "High"]
   let pollenTints = [muted, green, yellow, red]
-  let problem = wx == null || (lat != null && air == null) ? "…" : lat == null ? "location unknown" : !air.ok ? "open-meteo offline" : null
+  let problem = wx == null || (lat != null && air == null) ? "…" : lat == null ? "Location unknown" : !air.ok ? "Open-Meteo is offline" : null
+
+  let place = area.areaName[0].value ?? ""
+  let country = area.country[0].value ?? ""
+  let worst = len(flying) == 0 ? null : flying[0]
+
+  // The city form: open, and what's typed in it.
+  state editing = false
+  state draft = ""
 
   onTap: screen()
 
@@ -67,95 +75,89 @@ widget "air and pollen" {
       Column {
         gap: 0
         align: center
-        Text { text: aqi == null ? "…" : round(aqi); fontSize: big ? 40 : 20; bold: true; color: tint; align: center }
-        Text { text: us ? "us aqi" : "eu aqi"; style: label; color: muted; align: center }
+        Text { text: aqi == null ? "…" : round(aqi); fontSize: big ? 48 : 20; bold: true; color: tint; align: center; maxLines: 1 }
+        Text { text: us ? "US AQI" : "EU AQI"; style: label; color: muted; align: center; maxLines: 1 }
       }
     }
   }
 
-  component PollenRow(p, size = 11) {
+  component PollenRow(p, size = 13) {
     Row {
-      gap: 6
+      gap: 8
       align: center
-      Text { text: p.name; fontSize: size; weight: 1; maxLines: 1 }
+      Text { text: upper(sub(p.name, 0, 1)) + sub(p.name, 1, len(p.name)); fontSize: size; weight: 1; maxLines: 1 }
       Dots { n: p.level; c: pollenTints[p.level] }
       Text { text: pollenWords[p.level]; fontSize: size; color: pollenTints[p.level]; width: size * 5.5; align: end; maxLines: 1 }
     }
   }
 
+  // The index big, its word beside it, then the worst pollen; from 3 rows, the pollen list.
   Column {
-    gap: 4
+    gap: 2
+    fill: true
     Row {
-      Text { text: "air"; style: muted; weight: 1 }
-      Text { text: lower(area.areaName[0].value ?? ""); fontSize: 10; color: muted; maxLines: 1; width: 96; align: end }
+      align: center
+      Text { text: "AIR"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: upper(place); style: label; color: muted; maxLines: 1; width: 96; align: end }
     }
     if problem != null {
-      Text { text: problem; style: small; color: muted }
+      Text { text: problem; fontSize: problem == "…" ? 40 : 18; bold: problem != "…"; maxLines: 2 }
     } else {
       Row {
         gap: 10
         align: center
-        weight: rows >= 3 ? 0 : 1
-        Gauge { size: 64 }
+        Text { text: round(aqi); fontSize: 40; color: tint; maxLines: 1 }
         Column {
           gap: 0
           weight: 1
-          Text { text: names[level]; style: body; bold: true; color: tint; maxLines: 2 }
-          Text { text: "pm2.5 ${round(cur.pm2_5)} µg/m³"; style: small; color: muted; maxLines: 1 }
-          if rows >= 3 || !hasPollen {
-            Text { text: "uv ${round(cur.uv_index)}"; style: small; color: muted; maxLines: 1 }
-          } else {
-            // Too short for the pollen list: the worst one, or none.
-            Text { text: len(flying) == 0 ? "no pollen" : "${flying[0].name} pollen ${pollenWords[flying[0].level]}"; style: small; color: len(flying) == 0 ? green : pollenTints[flying[0].level]; maxLines: 1 }
-          }
+          Text { text: names[level]; style: small; bold: true; color: tint; maxLines: 1 }
+          Text { text: us ? "US AQI" : "EU AQI"; style: small; color: muted; maxLines: 1 }
         }
       }
-      if rows >= 3 {
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "pollen · next 24 h"; style: label; color: muted }
+      if (rows ?? 2) < 3 {
+        // Too short for the pollen list: the worst one, or the fine dust.
+        Text {
+          text: !hasPollen ? "PM2.5 ${round(cur.pm2_5)} µg/m³" : worst == null ? "No pollen" : "${upper(sub(worst.name, 0, 1))}${sub(worst.name, 1, len(worst.name))} pollen ${lower(pollenWords[worst.level])}"
+          style: small; color: !hasPollen ? muted : worst == null ? green : pollenTints[worst.level]; maxLines: 1
+        }
+      } else {
+        Text { text: "PM2.5 ${round(cur.pm2_5)} µg/m³ · UV ${round(cur.uv_index)}"; style: small; color: muted; maxLines: 1 }
+        Spacer { height: 8 }
+        Text { text: "POLLEN"; style: label; color: muted; maxLines: 1 }
         Column {
           gap: 3
           weight: 1
           if !hasPollen {
-            Text { text: "no pollen forecast here (europe only)"; style: small; color: muted }
+            Text { text: "No forecast here (Europe only)"; style: small; color: muted; maxLines: 2 }
           } else if len(flying) == 0 {
-            Text { text: "none in the air"; style: small; color: green }
+            Text { text: "None in the air"; style: small; color: green; maxLines: 1 }
           } else {
-            for p in take(flying, rows >= 4 ? 5 : 3) key p.name { PollenRow { p: p } }
+            for p in take(flying, (rows ?? 3) >= 4 ? 5 : 3) key p.name { PollenRow { p: p } }
           }
         }
       }
     }
   }
 
-  screen {
-    title: "air and pollen"
-    Input {
-      text: city
-      placeholder: "city · empty = auto"
-      onSubmit: { city = trim(value); refresh() }
+  component Item(label, value, tint = foreground) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: tint; align: end; weight: 1; maxLines: 1 }
     }
-    if problem != null {
-      Text { text: problem; style: body; color: muted }
-    } else {
-      Column {
-        scroll: true
-        gap: 14
-        Row {
-          gap: 16
-          align: center
-          Gauge { big: true; size: 132 }
-          Column {
-            gap: 2
-            weight: 1
-            Text { text: names[level]; style: title; color: tint }
-            Text { text: advice[level]; style: small }
-            Text { text: "${lower(area.areaName[0].value)}, ${lower(area.country[0].value)}"; style: small; color: muted; maxLines: 1 }
-          }
-        }
+  }
 
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "next 24 hours"; style: label; color: accent }
+  component Hours() {
+    Column {
+      gap: 12
+      Text { text: "Next 24 hours"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        background: surface
+        radius: 28
+        clip: true
+        padding: [16, 20]
         Canvas {
           height: 110
           fill: width
@@ -173,49 +175,164 @@ widget "air and pollen" {
               rect(i * w + 1, 92 - v / top * 84, max(w - 2, 1), max(v / top * 84, 1), radius: 2, fill: tints[count(steps, s => v > s)])
             }
             if i % 6 == 0 {
-              text(i == 0 ? "now" : fmtTime(hours[i], "HH:mm"), i * w + w / 2, 104, size: 10, align: center, color: muted)
+              text(i == 0 ? "Now" : fmtTime(hours[i], "HH:mm"), i * w + w / 2, 104, size: 10, align: center, color: muted)
             }
           }
         }
+      }
+    }
+  }
 
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "pollutants now · µg/m³"; style: label; color: accent }
-        Grid {
-          columns: 3
-          gap: 8
-          for p in [["pm2.5", cur.pm2_5, 25], ["pm10", cur.pm10, 50], ["ozone", cur.ozone, 120], ["no₂", cur.nitrogen_dioxide, 40], ["uv index", cur.uv_index, 6]] {
-            Column {
-              gap: 0
-              padding: [10, 8]
-              border: 1
-              borderColor: alpha(muted, 0.3)
-              Text { text: p[0]; style: label; color: muted }
-              Text { text: p[1] == null ? "…" : round(p[1], 1); style: title; color: p[1] > p[2] ? orange : foreground }
-            }
-          }
+  component Pollutants() {
+    Column {
+      gap: 12
+      Text { text: "Pollutants now"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        for p, i in [["PM2.5", cur.pm2_5, 25, " µg/m³"], ["PM10", cur.pm10, 50, " µg/m³"], ["Ozone", cur.ozone, 120, " µg/m³"], ["Nitrogen dioxide", cur.nitrogen_dioxide, 40, " µg/m³"], ["UV index", cur.uv_index, 6, ""]] {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Item { label: p[0]; value: p[1] == null ? "…" : "${round(p[1], 1)}${p[3]}"; tint: p[1] > p[2] ? orange : foreground }
         }
+      }
+    }
+  }
 
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "pollen · next 24 hours"; style: label; color: accent }
+  component Pollen() {
+    Column {
+      gap: 12
+      Text { text: "Pollen, next 24 hours"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
         if !hasPollen {
-          Text { text: "open-meteo only forecasts pollen in europe."; style: small; color: muted }
+          Text { text: "Open-Meteo only forecasts pollen in Europe."; fontSize: 16; color: muted; padding: [20, 16] }
         } else {
-          for p in pollen.sortBy(p => -(p.peak ?? 0)) key p.name {
+          for p, i in pollen.sortBy(p => -(p.peak ?? 0)) key p.name {
+            Spacer { height: 1; fill: width; background: border; visible: i > 0 }
             Column {
-              gap: 2
-              PollenRow { p: p; size: 14 }
+              gap: 6
+              padding: [20, 14]
+              PollenRow { p: p; size: 16 }
               if p.level > 0 {
                 Row {
-                  gap: 6
+                  gap: 8
                   align: center
                   Sparkline { values: p.values.map(v => v ?? 0); min: 0; max: max(p.peak ?? 0, 1); color: pollenTints[p.level]; area: true; height: 24; weight: 1 }
-                  Text { text: p.peak == null ? "" : "peak ${round(p.peak)}"; style: label; color: muted; width: 72; align: end }
+                  Text { text: p.peak == null ? "" : "Peak ${round(p.peak)}"; fontSize: 14; color: muted; maxLines: 1 }
                 }
               }
             }
           }
         }
-        Text { text: "data: copernicus atmosphere monitoring service via open-meteo"; style: label; color: muted }
+      }
+    }
+  }
+
+  component Where() {
+    Column {
+      gap: 12
+      Text { text: "Location"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: { draft = city; editing = true }
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: city == "" ? "Where you are" : city; fontSize: 16; maxLines: 1 }
+            Text { text: place == "" ? "Not found yet" : city == "" ? "Found by your IP address · ${place}" : "${place}, ${country}"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+          Text { text: "›"; fontSize: 18; color: muted }
+        }
+      }
+      Text { text: "Data: Copernicus Atmosphere Monitoring Service, via Open-Meteo"; style: small; color: muted; padding: [4, 8, 0, 0] }
+    }
+  }
+
+  screen {
+    title: "air and pollen"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if problem != null {
+        Column {
+          gap: 0
+          Text { text: problem == "…" ? "…" : "No reading"; fontSize: 48; bold: true; maxLines: 1 }
+          Text { text: problem == "…" ? "Loading…" : problem; fontSize: 16; color: muted }
+        }
+        Where { }
+      } else {
+        Row {
+          gap: 16
+          align: center
+          Gauge { big: true; size: 132 }
+          Column {
+            gap: 2
+            weight: 1
+            Text { text: names[level]; fontSize: 28; bold: true; color: tint; maxLines: 2 }
+            Text { text: advice[level]; fontSize: 16; color: muted }
+            Text { text: country == "" ? place : "${place}, ${country}"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+        if (screenWidth ?? 0) > 600 {
+          Row {
+            gap: 16
+            Column { gap: 12; weight: 1
+              Hours { }
+              Pollutants { }
+            }
+            Column { gap: 12; weight: 1
+              Pollen { }
+              Where { }
+            }
+          }
+        } else {
+          Hours { }
+          Pollutants { }
+          Pollen { }
+          Where { }
+        }
+      }
+
+      // Where to look: a city typed in, or empty to go by the IP address.
+      if editing {
+        Sheet {
+          title: "Location"
+          onDismiss: editing = false
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: draft
+              placeholder: "City, or empty for where you are"
+              focus: editing
+              onChange: draft = value
+              onSubmit: { city = trim(value); editing = false; refresh() }
+            }
+            Row {
+              gap: 8
+              align: center
+              if city != "" {
+                Text { text: "Clear"; fontSize: 15; color: red; padding: [8, 12]; onTap: { city = ""; editing = false; refresh() } }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editing = false }
+              Text { text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: { city = trim(draft); editing = false; refresh() } }
+            }
+          }
+        }
       }
     }
   }

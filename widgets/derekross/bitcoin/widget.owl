@@ -1,7 +1,7 @@
 widget "bitcoin" {
   size: 6x2
   minSize: 3x2
-  meta { description: "The bitcoin price in US dollars from Coinbase, with its 24-hour change and chart"; version: "1.0"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "The bitcoin price in US dollars from Coinbase, with its 24-hour change and chart"; version: "1.1"; license: "MIT"; category: "world"; owl: 8 }
 
   // Coinbase's public APIs, no key needed. Spot price every 30 s; 15-minute candles for the chart.
   source spot = http("https://api.coinbase.com/v2/prices/BTC-USD/spot") every 30s timeout 10s json
@@ -15,21 +15,103 @@ widget "bitcoin" {
   let up = change == null || change >= 0
   let lo = min(day.map(c => c[1]))
   let hi = max(day.map(c => c[2]))
+  let volume = sum(day.map(c => c[5]))
+  let money = price == null ? "…" : "$${floor(round(price) / 1000)},${pad(round(price) % 1000, 3, "0")}"
+  let changeText = change == null ? "…" : "${up ? "▲" : "▼"} ${fixed(abs(change), 2)}%"
+  let rangeText = lo == null ? "" : "$${round(lo / 1000, 1)}k – $${round(hi / 1000, 1)}k"
 
-  onTap: url("https://www.coinbase.com/price/bitcoin")
+  onTap: screen()
+
+  // 2 rows: the price and the chart; from 3, the day's range under the price.
+  let short = (rows ?? 2) < 3
 
   Column {
     gap: 2
+    fill: true
     Row {
       align: center
-      Text { text: "₿ bitcoin"; style: label; color: orange; weight: 1 }
-      Text { text: change == null ? "…" : "${up ? "▲" : "▼"} ${fixed(abs(change), 2)}%"; style: small; color: up ? green : red; width: 90; align: end }
+      Text { text: "BITCOIN"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: changeText; style: label; color: up ? green : red; maxLines: 1 }
     }
     Row {
       align: bottom
-      Text { text: price == null ? "…" : "$${floor(round(price) / 1000)},${pad(round(price) % 1000, 3, "0")}"; style: title; maxLines: 1; weight: 1 }
-      Text { text: lo == null ? "" : "24h ${round(lo / 1000, 1)}k–${round(hi / 1000, 1)}k"; style: small; color: muted; width: 120; align: end; maxLines: 1; visible: cols == null || cols >= 4 }
+      Text { text: money; fontSize: short ? 32 : 40; maxLines: 1; weight: 1 }
+      Text { text: "24h ${rangeText}"; style: small; color: muted; maxLines: 1; visible: short && (cols ?? 6) >= 5 && rangeText != "" }
     }
+    Text { text: rangeText == "" ? "…" : "24h ${rangeText}"; style: small; color: muted; maxLines: 1; visible: !short }
     Sparkline { values: prices; min: lo; max: hi; color: up ? green : red; area: true; thickness: 2; fill: width; weight: 1 }
+  }
+
+  component Item(label, value, tint = foreground) {
+    Row {
+      gap: 16
+      align: center
+      padding: [20, 14]
+      Text { text: label; fontSize: 16; maxLines: 1 }
+      Text { text: value; fontSize: 16; color: tint; align: end; weight: 1; maxLines: 1 }
+    }
+  }
+
+  component Chart() {
+    Column {
+      gap: 8
+      background: surface
+      radius: 28
+      clip: true
+      padding: [16, 20]
+      Sparkline { values: prices; min: lo; max: hi; color: up ? green : red; area: true; thickness: 2; fill: width; height: 160 }
+      Row {
+        Text { text: "24 hours ago"; style: small; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "Now"; style: small; color: muted; maxLines: 1 }
+      }
+    }
+  }
+
+  component Stats() {
+    Column {
+      gap: 12
+      Text { text: "Last 24 hours"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Item { label: "Change"; value: changeText; tint: up ? green : red }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Open"; value: open == null ? "…" : "$${round(open)}" }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "High"; value: hi == null ? "…" : "$${round(hi)}" }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Low"; value: lo == null ? "…" : "$${round(lo)}" }
+        Spacer { height: 1; fill: width; background: border }
+        Item { label: "Volume"; value: len(day) == 0 ? "…" : "${round(volume)} BTC" }
+      }
+      Text { text: "Prices from Coinbase, in US dollars."; style: small; color: muted; padding: [4, 8, 0, 0] }
+    }
+  }
+
+  screen {
+    title: "bitcoin"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: money; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: change == null ? "Loading…" : "${changeText} in 24 hours"; fontSize: 16; color: up ? green : red; maxLines: 1 }
+      }
+      if (screenWidth ?? 0) > 600 {
+        Row {
+          gap: 12
+          Chart { weight: 1 }
+          Stats { weight: 1 }
+        }
+      } else {
+        Chart { }
+        Stats { }
+      }
+      Text { text: "Open on Coinbase"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://www.coinbase.com/price/bitcoin") }
+    }
   }
 }

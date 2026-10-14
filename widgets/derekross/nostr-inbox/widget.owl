@@ -1,7 +1,7 @@
 widget "nostr" {
   size: 3x3
   minSize: 3x2
-  meta { description: "Your nostr inbox: new zaps, replies, mentions, reactions and reposts. Enter any npub or NIP-05 address; tap for the full list"; version: "1.1"; license: "MIT"; category: "news"; owl: 6 }
+  meta { description: "Your nostr inbox: new zaps, replies, mentions, reactions and reposts. Enter any npub or NIP-05 address; tap for the full list"; version: "1.2"; license: "MIT"; category: "news"; owl: 9 }
   requires { pacman: ["websocat", "jq", "curl"] }
 
   state who = "" persist          // the npub, nprofile, hex key or NIP-05 address entered
@@ -9,6 +9,8 @@ widget "nostr" {
   state alerts = true persist     // notify on new zaps
   state tab = "all"
   state amberAt = 0               // when Amber was last asked to decrypt the mute list (NIP-46)
+  state editingWho = false        // the account sheet is open
+  state draft = ""                // the account, as typed there
   source now = clock every 1m
 
   // Only these characters reach the shell.
@@ -205,158 +207,246 @@ jq -nc --arg pk "$pk" --argjson me "$me" --slurpfile items $t/items.json --slurp
 
   onTap: screen()
 
-  component Ago(t) {
-    Text { text: t == null ? "" : now - t < 3600 ? "${max(floor((now - t) / 60), 1)}m" : now - t < 86400 ? "${floor((now - t) / 3600)}h" : "${floor((now - t) / 86400)}d"; style: small; color: muted; align: end; maxLines: 1 }
-  }
+  let short = (rows ?? 3) < 3
+  let satsText = sats >= 1000 ? "${fixed(sats / 1000, 1)}k" : "${sats}"
+  let ok = who != "" && valid && data != null && data.error == null
 
-  component Count(glyph, value, note, tint) {
-    Column {
-      gap: 0
-      align: center
-      Text { text: "${glyph} ${value}"; style: title; color: value == 0 || value == "0" ? muted : tint; align: center; maxLines: 1 }
-      Text { text: note; style: label; color: muted; align: center; maxLines: 1 }
-    }
-  }
-
-  component Setup() {
-    Column {
-      gap: 6
-      Text { text: "nostr inbox"; style: label; color: magenta }
-      Text { text: "enter your npub or nip-05 address"; style: small; color: muted }
-      Input { text: who; placeholder: "npub or name@domain"; fontSize: 13; onSubmit: { who = trim(value); seen = now - 86400; good = null; notifiedAt = now } }
-    }
-  }
-
-  if who == "" {
-    Setup { }
-  } else if !valid || data.error != null {
-    Column {
-      gap: 6
-      Text { text: "nostr inbox"; style: label; color: magenta }
-      Text { text: valid ? data.error : "that doesn't look like an npub or name@domain"; style: small; color: red; maxLines: 3 }
-      Button { text: "change"; onTap: who = "" }
-    }
-  } else if data == null {
-    Column {
-      gap: 6
-      Text { text: "nostr inbox"; style: label; color: magenta }
-      Text { text: inbox == null ? "asking the relays…" : inbox.code == 124 ? "relays timed out, retrying" : "couldn't reach the relays"; style: small; color: muted }
-    }
-  } else {
-    Column {
-      gap: 4
+  // The tile: what's new, big, then the newest as rows allow.
+  Column {
+    gap: 2
+    fill: true
+    if !short {
       Row {
         align: center
-        Text { text: "nostr"; style: label; color: magenta; width: 52 }
-        Text { text: data.name ?? id; style: small; color: muted; align: end; maxLines: 1; weight: 1 }
+        Text { text: "NOSTR"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: upper(data.name ?? ""); style: label; color: accent; width: 96; align: end; maxLines: 1; visible: ok && (cols ?? 3) >= 4 }
       }
-      Row {
-        gap: 4
-        Count { glyph: "⚡"; value: sats >= 1000 ? "${fixed(sats / 1000, 1)}k" : "${sats}"; note: "${len(zaps)} zaps"; tint: yellow; weight: 1 }
-        Count { glyph: "↩"; value: len(talk); note: "replies"; tint: cyan; weight: 1 }
-        Count { glyph: "♥"; value: len(likes); note: "reactions"; tint: red; weight: 1 }
-      }
+    }
+    if who == "" {
+      Text { text: "Set up"; fontSize: short ? 32 : 40; maxLines: 1 }
+      Text { text: "Tap to add your npub"; style: small; color: muted; maxLines: 1 }
+    } else if !valid || data.error != null {
+      Text { text: "Not found"; fontSize: 32; maxLines: 1 }
+      Text { text: valid ? data.error : "Not an npub or name@domain"; style: small; color: red; maxLines: 2 }
+    } else if data == null {
+      Text { text: "…"; fontSize: short ? 32 : 40; maxLines: 1 }
+      Text { text: inbox == null ? "Asking the relays" : inbox.code == 124 ? "Relays timed out, retrying" : "Couldn't reach the relays"; style: small; color: muted; maxLines: 1 }
+    } else {
+      Text { text: "${len(fresh)} new"; fontSize: short ? 32 : 40; maxLines: 1 }
+      Text { text: "⚡ ${satsText} · ↩ ${len(talk)} · ♥ ${len(likes)}"; style: small; color: muted; maxLines: 1 }
       Spacer { weight: 1 }
       if len(fresh) == 0 {
-        Text { text: "all caught up"; style: small; color: muted; maxLines: 1 }
-      } else {
-        for i in fresh.take(rows >= 3 ? 3 : 1) key i.id {
-          Row {
-            gap: 6
-            Glyph { it: i }
-            Text { text: i.name; style: small; bold: true; maxLines: 1; width: cols >= 5 ? 150 : 90 }
-            Text { text: i.type == "zap" ? "${i.sats ?? "?"} sats${i.text == "" ? "" : " · " + i.text}" : i.type == "reaction" ? "reacted" : i.type == "repost" ? "reposted" : i.text; style: small; color: muted; maxLines: 1; weight: 1 }
-          }
+        Text { text: "All caught up"; style: small; color: muted; maxLines: 1; visible: !short }
+      }
+      for i in fresh.take(short ? 0 : (rows ?? 3) * 2 - 3) key i.id {
+        Row {
+          gap: 6
+          align: center
+          Glyph { it: i; size: 12 }
+          Text { text: i.name; style: small; bold: true; maxLines: 1; width: (cols ?? 3) >= 5 ? 150 : 80 }
+          Text { text: i.type == "zap" ? "${i.sats ?? "?"} sats${i.text == "" ? "" : " · " + i.text}" : i.type == "reaction" ? "reacted" : i.type == "repost" ? "reposted" : i.text; style: small; color: muted; maxLines: 1; weight: 1 }
         }
       }
     }
   }
 
+  // The app: what's new and the whole week by kind, then the account and alerts.
   screen {
     title: "nostr inbox"
     Column {
       scroll: true
-      gap: 10
-      if data != null && data.error == null {
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if ok {
+        Column {
+          gap: 0
+          Text { text: "${len(fresh)} new"; fontSize: 48; bold: true; maxLines: 1 }
+          Text { text: "${data.name ?? id} · ⚡ ${sats} sats from ${len(zaps)} new zap${len(zaps) == 1 ? "" : "s"}"; fontSize: 16; color: muted; maxLines: 2 }
+        }
         Row {
+          gap: 8
+          Text { text: "Mark all read"; fontSize: 16; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: seen = now }
+          Text { text: "Refresh"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: refresh() }
+        }
+        Row {
+          gap: 6
+          for t in [["all", "All"], ["zaps", "Zaps"], ["replies", "Replies"], ["reactions", "Reactions"]] {
+            Text { text: t[1]; fontSize: 14; weight: 1; align: center; maxLines: 1; color: foreground; background: tab == t[0] ? mix(surface, accent, 0.22) : surface; radius: 20; padding: [0, 10]; onTap: tab = t[0] }
+          }
+        }
+        // Each one opens in the phone's nostr app (NIP-21), or on njump.me. New ones are tinted.
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for i, k in shown key i.id {
+            Spacer { height: 1; fill: width; background: border; visible: k > 0 }
+            Row {
+              gap: 14
+              align: top
+              padding: [20, 14]
+              background: i.at > seen ? mix(surface, accent, 0.12) : transparent
+              onTap: url(i.nevent != null ? "nostr:" + i.nevent : "https://njump.me/" + i.ref)
+              Glyph { it: i; size: 18 }
+              Column {
+                gap: 2
+                weight: 1
+                Text { text: i.name; fontSize: 16; bold: i.at > seen; maxLines: 1 }
+                Text {
+                  text: (i.type == "zap" ? "Zapped ${i.sats ?? "?"} sats" : i.type == "reply" ? "Replied" : i.type == "mention" ? "Mentioned you" : i.type == "repost" ? (i.mine ? "Reposted your note" : "Reposted") : (i.mine ? "Reacted to your note" : "Reacted")) + " · " + (now - i.at < 3600 ? "${max(floor((now - i.at) / 60), 1)}m" : now - i.at < 86400 ? "${floor((now - i.at) / 3600)}h" : "${floor((now - i.at) / 86400)}d")
+                  fontSize: 14; color: muted; maxLines: 1
+                }
+                Text { text: i.text; fontSize: 15; maxLines: 3; visible: i.text != "" && i.type != "reaction" }
+              }
+            }
+          }
+          if len(shown) == 0 {
+            Text { text: "Nothing in the last 7 days."; fontSize: 16; color: muted; padding: [20, 16] }
+          }
+        }
+      } else {
+        Column {
+          gap: 0
+          Text { text: who == "" ? "Your inbox" : !valid || data.error != null ? "Not found" : "Loading"; fontSize: 48; bold: true; maxLines: 1 }
+          Text {
+            text: who == "" ? "Zaps, replies, mentions, reactions and reposts from the last week. Add your npub or NIP-05 address to start; only public data is read." : !valid ? "That doesn't look like an npub or name@domain." : data.error != null ? data.error : inbox == null ? "Asking the relays…" : inbox.code == 124 ? "Relays timed out, retrying" : "Couldn't reach the relays"
+            fontSize: 16; color: who != "" && (!valid || data.error != null) ? red : muted
+          }
+        }
+        if who == "" {
+          Text { text: "Add your account"; fontSize: 16; bold: true; maxLines: 1; align: center; fill: width; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: { draft = ""; editingWho = true } }
+        }
+      }
+
+      Text { text: "Settings"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Row {
+          gap: 16
           align: center
+          padding: [20, 14]
+          onTap: { draft = who; editingWho = true }
           Column {
             gap: 0
             weight: 1
-            Text { text: data.name ?? id; style: title; maxLines: 1 }
-            Text { text: "${len(fresh)} new · ${len(zaps)} zaps · ${sats} sats"; style: small; color: muted; maxLines: 1 }
+            Text { text: "Account"; fontSize: 16; maxLines: 1 }
+            Text { text: who == "" ? "Not set" : who; fontSize: 14; color: muted; maxLines: 1 }
           }
-          Button { text: "mark read"; onTap: seen = now }
+          Text { text: "›"; fontSize: 18; color: muted }
         }
+        Spacer { height: 1; fill: width; background: border }
         Row {
-          gap: 6
-          for t in ["all", "zaps", "replies", "reactions"] {
-            Button { text: t; color: tab == t ? accent : muted; onTap: tab = t }
+          gap: 16
+          align: center
+          padding: [20, 14]
+          onTap: alerts = !alerts
+          Column {
+            gap: 0
+            weight: 1
+            Text { text: "Zap alerts"; fontSize: 16; maxLines: 1 }
+            Text { text: "A notification for each new zap"; fontSize: 14; color: muted; maxLines: 1 }
           }
-        }
-        if len(shown) == 0 {
-          Text { text: "nothing in the last 7 days"; style: body; color: muted }
-        }
-        for i in shown key i.id {
-          Row {
-            gap: 10
-            padding: [8, 6]
-            background: i.at > seen ? alpha(magenta, 0.1) : alpha(muted, 0.04)
-            onTap: url(i.nevent != null ? "nostr:" + i.nevent : "https://njump.me/" + i.ref)
-            Glyph { it: i; size: 18 }
-            Column {
-              gap: 1
-              weight: 1
-              Row {
-                Text { text: i.name; style: body; bold: true; maxLines: 1; weight: 1 }
-                Ago { t: i.at; width: 40 }
-              }
-              Text { text: i.type == "zap" ? "zapped ${i.sats ?? "?"} sats" : i.type == "reply" ? "replied" : i.type == "mention" ? "mentioned you" : i.type == "repost" ? (i.mine ? "reposted your note" : "reposted") : (i.mine ? "reacted to your note" : "reacted"); style: small; color: muted; maxLines: 1 }
-              if i.text != "" && i.type != "reaction" {
-                Text { text: i.text; style: small; maxLines: 3 }
-              }
-            }
+          Box {
+            width: 52; height: 32; radius: 16; background: alerts ? accent : transparent; border: alerts ? 0 : 2; borderColor: muted
+            Spacer { size: alerts ? 24 : 16; radius: alerts ? 12 : 8; background: alerts ? background : muted; offset: [alerts ? 24 : 8, alerts ? 4 : 8] }
           }
-        }
-        Spacer { height: 1; fill: width; background: alpha(muted, 0.25) }
-        Text { text: "account"; style: label; color: accent }
-        Input { text: who; placeholder: "npub1… or name@domain"; fontSize: 13; onSubmit: { who = trim(value); seen = now - 86400; good = null; notifiedAt = now } }
-        Row {
-          gap: 6
-          Button { text: alerts ? "zap alerts: on" : "zap alerts: off"; color: alerts ? accent : muted; onTap: alerts = !alerts }
-          Button { text: "refresh"; color: muted; onTap: refresh() }
         }
         // NIP-46 pairing with Amber, which decrypts the private part of the mute list (NIP-51).
-        if data.mutes.nak && data.mutes.private != null {
+        if ok && data.mutes.nak && data.mutes.private != null {
+          Spacer { height: 1; fill: width; background: border }
           Row {
-            gap: 6
+            gap: 12
             align: center
+            padding: [20, 14]
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: "Private mutes"; fontSize: 16; maxLines: 1 }
+              Text { text: data.mutes.bunker ? "Amber decrypts them" : "Pair Amber to decrypt them"; fontSize: 14; color: muted; maxLines: 1 }
+            }
             if data.mutes.bunker {
-              Text { text: "Amber connected"; style: small; color: muted; weight: 1 }
-              Button { text: "disconnect"; color: muted; onTap: run('rm -f ~/.config/nostr-inbox/bunker ~/.config/nostr-inbox/connect.secret ~/.cache/nostr-inbox/' + sh(muteName)) }
+              Text { text: "Disconnect"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: run('rm -f ~/.config/nostr-inbox/bunker ~/.config/nostr-inbox/connect.secret ~/.cache/nostr-inbox/' + sh(muteName)) }
             } else {
-        // Listens for Amber's answer to the nostrconnect:// link (it must echo our secret), saves the
-        // connection, then decrypts right away. Opens the link in Amber at the same time.
-        Button {
-          text: "connect Amber"
-          onTap: {
-            amberAt = now
-            run('k=~/.config/nostr-inbox; ck=$(cat $k/client.key); relays=$(cat $k/relays); ev=$(timeout 280 nak req -k 24133 -p $(nak key public $ck) --since $(($(date +%s) - 5)) -l 1 --stream $relays 2>/dev/null); from=$(printf %s "$ev" | jq -r .pubkey); [[ $from =~ ^[0-9a-f]{64}$ ]] || from=0; res=$(nak decrypt --sec $ck -p $from "$(printf %s "$ev" | jq -r .content)" 2>/dev/null | jq -r .result); [ -n "$res" ] && [ "$res" = "$(cat $k/connect.secret)" ] && (umask 077; printf %s "bunker://$from?$(for r in $relays; do printf "relay=%s&" $(printf %s $r | jq -Rr @uri); done)" > $k/bunker) && rm -f $k/connect.secret; [ -s $k/bunker ] && ' + 'umask 077; k=~/.config/nostr-inbox; m=~/.cache/nostr-inbox/' + sh(muteName) + '; c=~/.cache/nostr-inbox/' + sh(cipherName) + '; NOSTR_CLIENT_KEY=$(cat $k/client.key) timeout 120 nak decrypt --sec "$(cat $k/bunker)" -p ' + sh(data.pk) + (data.mutes.nip04 ? ' --nip04' : '') + ' "$(cat "$c")" > "$m".tmp && jq -e "type == \"array\"" "$m".tmp > /dev/null && mv "$m".tmp "$m"; rm -f "$m".tmp')
-            url(data.mutes.connect)
+              // Listens for Amber's answer to the nostrconnect:// link (it must echo our secret), saves the
+              // connection, then decrypts right away. Opens the link in Amber at the same time.
+              Text {
+                text: "Connect"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  amberAt = now
+                  run('k=~/.config/nostr-inbox; ck=$(cat $k/client.key); relays=$(cat $k/relays); ev=$(timeout 280 nak req -k 24133 -p $(nak key public $ck) --since $(($(date +%s) - 5)) -l 1 --stream $relays 2>/dev/null); from=$(printf %s "$ev" | jq -r .pubkey); [[ $from =~ ^[0-9a-f]{64}$ ]] || from=0; res=$(nak decrypt --sec $ck -p $from "$(printf %s "$ev" | jq -r .content)" 2>/dev/null | jq -r .result); [ -n "$res" ] && [ "$res" = "$(cat $k/connect.secret)" ] && (umask 077; printf %s "bunker://$from?$(for r in $relays; do printf "relay=%s&" $(printf %s $r | jq -Rr @uri); done)" > $k/bunker) && rm -f $k/connect.secret; [ -s $k/bunker ] && ' + 'umask 077; k=~/.config/nostr-inbox; m=~/.cache/nostr-inbox/' + sh(muteName) + '; c=~/.cache/nostr-inbox/' + sh(cipherName) + '; NOSTR_CLIENT_KEY=$(cat $k/client.key) timeout 120 nak decrypt --sec "$(cat $k/bunker)" -p ' + sh(data.pk) + (data.mutes.nip04 ? ' --nip04' : '') + ' "$(cat "$c")" > "$m".tmp && jq -e "type == \"array\"" "$m".tmp > /dev/null && mv "$m".tmp "$m"; rm -f "$m".tmp')
+                  url(data.mutes.connect)
+                }
+              }
+            }
           }
-        }
-        // If Android stopped the listener while Amber was open: Amber signs as the user, so pair with their key.
-        if amberAt > 0 {
-          Button { text: "done in Amber"; color: muted; onTap: run('k=~/.config/nostr-inbox; [ -s $k/bunker ] || (umask 077; printf %s "bunker://"' + sh(data.pk) + '"?$(for r in $(cat $k/relays); do printf "relay=%s&" $(printf %s $r | jq -Rr @uri); done)" > $k/bunker); ' + 'umask 077; k=~/.config/nostr-inbox; m=~/.cache/nostr-inbox/' + sh(muteName) + '; c=~/.cache/nostr-inbox/' + sh(cipherName) + '; NOSTR_CLIENT_KEY=$(cat $k/client.key) timeout 120 nak decrypt --sec "$(cat $k/bunker)" -p ' + sh(data.pk) + (data.mutes.nip04 ? ' --nip04' : '') + ' "$(cat "$c")" > "$m".tmp && jq -e "type == \"array\"" "$m".tmp > /dev/null && mv "$m".tmp "$m"; rm -f "$m".tmp') }
-        }
+          // If Android stopped the listener while Amber was open: Amber signs as the user, so pair with their key.
+          if !data.mutes.bunker && amberAt > 0 {
+            Spacer { height: 1; fill: width; background: border }
+            Row {
+              gap: 12
+              align: center
+              padding: [20, 14]
+              Text { text: "Approved it in Amber?"; fontSize: 16; weight: 1; maxLines: 1 }
+              Text { text: "Done"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: run('k=~/.config/nostr-inbox; [ -s $k/bunker ] || (umask 077; printf %s "bunker://"' + sh(data.pk) + '"?$(for r in $(cat $k/relays); do printf "relay=%s&" $(printf %s $r | jq -Rr @uri); done)" > $k/bunker); ' + 'umask 077; k=~/.config/nostr-inbox; m=~/.cache/nostr-inbox/' + sh(muteName) + '; c=~/.cache/nostr-inbox/' + sh(cipherName) + '; NOSTR_CLIENT_KEY=$(cat $k/client.key) timeout 120 nak decrypt --sec "$(cat $k/bunker)" -p ' + sh(data.pk) + (data.mutes.nip04 ? ' --nip04' : '') + ' "$(cat "$c")" > "$m".tmp && jq -e "type == \"array\"" "$m".tmp > /dev/null && mv "$m".tmp "$m"; rm -f "$m".tmp') }
             }
           }
         }
-        if data.relays != null {
-          Text { text: "relays: ${join(data.relays, ", ")}"; style: label; color: muted }
+      }
+      if ok && data.relays != null {
+        Text { text: "Relays: ${join(data.relays, ", ")}"; fontSize: 14; color: muted; padding: [4, 8, 0, 0] }
+      }
+
+      // The account: any npub, nprofile, hex key or NIP-05 address.
+      if editingWho {
+        Sheet {
+          title: "Account"
+          onDismiss: editingWho = false
+          Column {
+            gap: 16
+            padding: [0, 4, 0, 4]
+            Input {
+              text: draft
+              placeholder: "npub1… or name@domain"
+              focus: editingWho
+              onChange: draft = value
+              onSubmit: {
+                if trim(value) != who {
+                  who = trim(value)
+                  seen = now - 86400
+                  good = null
+                  notifiedAt = now
+                }
+                editingWho = false
+              }
+            }
+            Text { text: "Only public data is read; no keys needed."; fontSize: 14; color: muted }
+            Row {
+              gap: 8
+              align: center
+              if who != "" {
+                Text { text: "Remove"; fontSize: 15; color: red; padding: [8, 12]; onTap: { who = ""; editingWho = false } }
+              }
+              Spacer { weight: 1 }
+              Text { text: "Cancel"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: editingWho = false }
+              Text {
+                text: "Save"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]
+                onTap: {
+                  if trim(draft) != who {
+                    who = trim(draft)
+                    seen = now - 86400
+                    good = null
+                    notifiedAt = now
+                  }
+                  editingWho = false
+                }
+              }
+            }
+          }
         }
-      } else {
-        Setup { }
       }
     }
   }

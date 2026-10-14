@@ -2,7 +2,7 @@ widget "btclock" {
   size: 6x2
   minSize: 4x2
   padding: 14
-  meta { description: "Live Bitcoin network data as BTClock-style e-paper panels: block height, price, Moscow time, fees, halving and supply"; version: "1.2"; license: "MIT"; category: "world"; owl: 5 }
+  meta { description: "Live Bitcoin network data as BTClock-style e-paper panels: block height, price, Moscow time, fees, halving and supply"; version: "1.3"; license: "MIT"; category: "world"; owl: 9 }
 
   // mempool.space's public API. The tile rotates the fields you enable, in the order you set.
   source height = http("https://mempool.space/api/blocks/tip/height") every 60s timeout 15s
@@ -11,10 +11,10 @@ widget "btclock" {
   source blocks = http("https://mempool.space/api/v1/fees/mempool-blocks") every 60s json timeout 15s
 
   state idx = 0
-  // Which fields show and in which order: their ids, comma-separated. Change it on the config tab.
+  // Which fields show and in which order: their ids, comma-separated. Change it in the screen.
   state order = "height,price,moscow,fees,nextfee,halving,mcap,supply" persist
-  // The screen's tab: the field list, or the config.
-  state tab = "fields"
+  // The field whose sheet is open, by id; "" for none.
+  state picking = ""
 
   let h = num(height, null)
   let price = num(prices.USD, null)
@@ -42,16 +42,16 @@ widget "btclock" {
   let mcapText = mcap == null ? null : mcap >= 1000000000000 ? "$" + fixed(mcap / 1000000000000, 2) + "T" : mcap >= 1000000000 ? "$" + fixed(mcap / 1000000000, 1) + "B" : "$" + fixed(mcap / 1000000, 1) + "M"
   let supplyText = supply == null ? null : "₿" + fixed(supply / 1000000, 2) + "M"
 
-  // Every field the widget knows, enabled or not, for the config list.
+  // Every field the widget knows, enabled or not, for the screen's list.
   let all = [
-    { id: "height", label: "block height", value: heightText, tint: orange },
-    { id: "price", label: "bitcoin price", value: priceText, tint: foreground },
-    { id: "moscow", label: "moscow time", value: moscowText, tint: foreground },
-    { id: "fees", label: "fees sat/vB", value: feesText, panel: feePanel, tint: foreground },
-    { id: "nextfee", label: "next block fee", value: nextText, tint: foreground },
-    { id: "halving", label: "to halving", value: halvingText, tint: yellow },
-    { id: "mcap", label: "market cap", value: mcapText, tint: cyan },
-    { id: "supply", label: "supply", value: supplyText, tint: orange }
+    { id: "height", label: "block height", name: "Block height", value: heightText, tint: orange },
+    { id: "price", label: "bitcoin price", name: "Bitcoin price", value: priceText, tint: foreground },
+    { id: "moscow", label: "moscow time", name: "Moscow time", value: moscowText, tint: foreground },
+    { id: "fees", label: "fees sat/vB", name: "Fees, sat/vB", value: feesText, panel: feePanel, tint: foreground },
+    { id: "nextfee", label: "next block fee", name: "Next block fee", value: nextText, tint: foreground },
+    { id: "halving", label: "to halving", name: "Blocks to halving", value: halvingText, tint: yellow },
+    { id: "mcap", label: "market cap", name: "Market cap", value: mcapText, tint: cyan },
+    { id: "supply", label: "supply", name: "Supply", value: supplyText, tint: orange }
   ]
   // The enabled fields, in the saved order, that have loaded a value.
   let ids = words(replace(order, ",", " "))
@@ -59,6 +59,9 @@ widget "btclock" {
   let onCount = len(screens)
   let count = max(onCount, 1)
   let cur = screens[idx % count]
+  // The screen's list: those on the tile in their order, then the rest.
+  let listed = map(ids, id => find(all, s => s.id == id)).filter(s => s != null) + all.filter(s => indexOf(ids, s.id) < 0)
+  let wide = (screenWidth ?? 0) > 600
 
   every 20s { idx = (idx + 1) % count }
   onTap: screen()
@@ -86,83 +89,134 @@ widget "btclock" {
     }
   }
 
+  // The tile: what's showing, and the panels.
   Column {
     gap: 8
     Row {
       align: center
-      Text { text: cur == null ? "bitcoin…" : upper(cur.label); style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: cur == null ? "BITCOIN" : upper(cur.label); style: label; color: muted; weight: 1; maxLines: 1 }
       Text { text: "${(idx % count) + 1}/${count}"; style: label; color: muted; width: 44; align: end; maxLines: 1 }
     }
     Panels { value: cur == null ? null : (cur.panel ?? cur.value); tint: cur == null ? foreground : cur.tint }
+  }
+
+  component Now() {
+    Column {
+      gap: 12
+      Column {
+        gap: 0
+        Text { text: priceText ?? "…"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: h == null ? "Loading from mempool.space" : "Block ${hStr} · ${moscowText ?? "…"} Moscow time"; fontSize: 16; color: muted; maxLines: 1 }
+      }
+      // What the tile shows now, panels and all.
+      Column {
+        gap: 12
+        background: surface; radius: 28; padding: 20
+        Row {
+          align: center
+          Text { text: cur == null ? "On the tile" : cur.name; fontSize: 14; color: muted; weight: 1; maxLines: 1 }
+          Text { text: "${(idx % count) + 1} of ${count}"; fontSize: 14; color: muted; maxLines: 1 }
+        }
+        Panels { value: cur == null ? null : (cur.panel ?? cur.value); tint: cur == null ? foreground : cur.tint }
+      }
+      Row {
+        gap: 12
+        Text { text: "Refresh"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: refresh() }
+        Text { text: "mempool.space"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: url("https://mempool.space") }
+      }
+    }
+  }
+
+  component Fields() {
+    Column {
+      gap: 12
+      Row {
+        align: center
+        padding: [4, 8, 4, 0]
+        Text { text: "Fields"; fontSize: 14; bold: true; color: accent; weight: 1 }
+        Text { text: "${onCount} on the tile"; fontSize: 14; color: muted; maxLines: 1 }
+      }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        for s, k in listed key s.id {
+          let at = indexOf(ids, s.id)
+          Spacer { height: 1; fill: width; background: border; visible: k > 0 }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            onTap: picking = s.id
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: s.name; fontSize: 16; maxLines: 1 }
+              Text { text: at < 0 ? "Not on the tile" : "On the tile · ${at + 1} of ${len(ids)}"; fontSize: 14; color: muted; maxLines: 1 }
+            }
+            Text { text: s.value ?? "…"; font: mono; fontSize: 18; bold: true; color: at < 0 ? muted : s.tint; maxLines: 1 }
+          }
+        }
+      }
+      Text { text: "Reset fields"; fontSize: 16; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [24, 14]; onTap: order = "height,price,moscow,fees,nextfee,halving,mcap,supply" }
+    }
   }
 
   screen {
     title: "btclock"
     Column {
       scroll: true
-      gap: 10
-      Row {
-        gap: 8
-        align: center
-        Button { text: "fields"; color: tab == "fields" ? accent : muted; onTap: tab = "fields" }
-        Button { text: "config"; color: tab == "config" ? accent : muted; onTap: tab = "config" }
-        Spacer { weight: 1 }
-        Text { text: "${onCount} on"; style: small; color: muted }
-      }
-      if tab == "config" {
-        Column {
-          gap: 8
-          Text { text: "tap a field to turn it on or off; ↑ / ↓ move the ones that are on"; style: small; color: muted; maxLines: 3 }
-          for s in all key s.id {
-            let on = len(filter(ids, x => x == s.id)) > 0
-            let i = on ? indexOf(ids, s.id) : 0
-            let L = len(ids)
-            let jUp = L > 0 ? (i - 1 + L) % L : 0
-            let jDn = L > 0 ? (i + 1) % L : 0
-            Row {
-              gap: 8
-              align: center
-              padding: [12, 6]
-              background: color0
-              border: 1
-              borderColor: alpha(muted, 0.3)
-              radius: 6
-              Text { text: upper(s.label); style: label; color: on ? foreground : muted; weight: 1; maxLines: 1 }
-              Button { text: on ? "on" : "off"; color: on ? green : muted; onTap: order = on ? join(filter(ids, x => x != s.id), ",") : join(ids + [s.id], ",") }
-              if on {
-                Button { text: "↑"; onTap: order = join(map(range(L), k => k == i ? ids[jUp] : k == jUp ? ids[i] : ids[k]), ",") }
-                Button { text: "↓"; onTap: order = join(map(range(L), k => k == i ? ids[jDn] : k == jDn ? ids[i] : ids[k]), ",") }
-              }
-            }
-          }
-          Row {
-            gap: 8
-            justify: end
-            Button { text: "reset"; color: muted; onTap: order = "height,price,moscow,fees,nextfee,halving,mcap,supply" }
-            Button { text: "close"; onTap: close() }
-          }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      if wide {
+        Row {
+          gap: 24
+          Now { weight: 1 }
+          Fields { weight: 1 }
         }
       } else {
+        Now { }
+        Fields { }
+      }
+    }
+
+    // A field's sheet: on the tile or not, and its place in the rotation.
+    if picking != "" {
+      Sheet {
+        title: (find(all, x => x.id == picking) ?? {name: ""}).name
+        onDismiss: picking = ""
         Column {
-          gap: 10
-          for s in screens key s.id {
-            Row {
-              gap: 12
-              align: center
-              padding: [12, 10]
-              background: color0
-              border: 1
-              borderColor: alpha(muted, 0.3)
-              radius: 6
-              Text { text: upper(s.label); style: label; color: muted; weight: 1; maxLines: 1 }
-              Text { text: s.value; font: mono; fontSize: 22; bold: true; color: s.tint; width: 100; align: end }
+          let on = indexOf(ids, picking) >= 0
+          let i = on ? indexOf(ids, picking) : 0
+          let L = len(ids)
+          let jUp = L > 0 ? (i - 1 + L) % L : 0
+          let jDn = L > 0 ? (i + 1) % L : 0
+          gap: 16
+          padding: [0, 4, 0, 4]
+          Row {
+            gap: 16
+            align: center
+            padding: [0, 8]
+            onTap: order = on ? join(filter(ids, x => x != picking), ",") : join(ids + [picking], ",")
+            Column {
+              gap: 0
+              weight: 1
+              Text { text: "Show on the tile"; fontSize: 16 }
+              Text { text: on ? "Number ${i + 1} of ${L} in the rotation" : "Left out of the rotation"; fontSize: 14; color: muted }
+            }
+            Box {
+              width: 52; height: 32; radius: 16; background: on ? accent : transparent; border: on ? 0 : 2; borderColor: muted
+              Spacer { size: on ? 24 : 16; radius: on ? 12 : 8; background: on ? background : muted; offset: [on ? 24 : 8, on ? 4 : 8] }
             }
           }
           Row {
             gap: 8
-            justify: end
-            Button { text: "refresh"; onTap: refresh() }
-            Button { text: "close"; onTap: close() }
+            align: center
+            if on && L > 1 {
+              Text { text: "Move up"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: order = join(map(range(L), k => k == i ? ids[jUp] : k == jUp ? ids[i] : ids[k]), ",") }
+              Text { text: "Move down"; fontSize: 15; maxLines: 1; background: mix(surface, accent, 0.22); radius: 24; padding: [20, 12]; onTap: order = join(map(range(L), k => k == i ? ids[jDn] : k == jDn ? ids[i] : ids[k]), ",") }
+            }
+            Spacer { weight: 1 }
+            Text { text: "Done"; fontSize: 15; bold: true; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 12]; onTap: picking = "" }
           }
         }
       }

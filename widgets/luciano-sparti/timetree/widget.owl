@@ -4,10 +4,10 @@ widget "timetree" {
 
   meta {
     description: "TimeTree shared calendar with monthly view, agenda, quick app launch, and phone notification reminders"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "productivity"
-    owl: 5
+    owl: 8
   }
 
   requires {
@@ -120,7 +120,14 @@ widget "timetree" {
   let allEvents = events ?? []
   let dayEvents = allEvents.filter(e => e.date == activeDate)
   let ttNotifs = (notifs.items ?? []).filter(n => n.package == "works.jubilee.timetree")
+  // TimeTree's green, for its logo only.
   let ttColor = #10b981
+  let dayTitle = activeDate == todayDate ? "Today" : fmtTime(parseTime(activeDate, "yyyy-MM-dd"), "EEE d")
+  // Day cells as wide as a seventh of the screen allows, and two columns when there's room.
+  let cell = clamp(floor((screenWidth ?? 328) / 7) - 4, 34, 56)
+  let twoCols = (screenWidth ?? 0) > 600
+
+  onTap: screen()
 
   component TreeLogo(sz = 20) {
     Canvas {
@@ -136,26 +143,19 @@ widget "timetree" {
     let isSel = day.date == activeDate
     let dayCol = !day.cur ? alpha(foreground, 0.25) : (day.dow == 0 ? red : (day.dow == 6 ? cyan : foreground))
     Column {
+      gap: 1
       weight: 1
       align: center
-      padding: [0, 1]
       onTap: selectedDate = day.date
 
       Box {
         size: 19
         radius: 9.5
-        background: day.today ? ttColor : (isSel ? alpha(ttColor, 0.25) : transparent)
-        border: (isSel && !day.today) ? 1.5 : 0
-        borderColor: ttColor
+        background: day.today ? accent : transparent
+        border: isSel && !day.today ? 1.5 : 0
+        borderColor: accent
         align: center
-
-        Text {
-          text: str(day.d)
-          fontSize: 10
-          bold: day.today || isSel
-          color: day.today ? #ffffff : dayCol
-          align: center
-        }
+        Text { text: str(day.d); fontSize: 10; bold: day.today || isSel; color: day.today ? background : dayCol; align: center; maxLines: 1 }
       }
 
       Row {
@@ -163,357 +163,112 @@ widget "timetree" {
         height: 3
         align: center
         if day.count > 0 {
-          Box { size: 3; radius: 1.5; background: day.colors[0] ?? ttColor }
+          Box { size: 3; radius: 1.5; background: day.colors[0] ?? accent }
         }
         if day.count > 1 {
-          Box { size: 3; radius: 1.5; background: day.colors[1] ?? #f59e0b }
+          Box { size: 3; radius: 1.5; background: day.colors[1] ?? accent }
         }
       }
     }
   }
 
-  component EventItem(ev) {
-    Row {
-      gap: 5
-      align: center
-      padding: [4, 3]
-      radius: 4
-      background: alpha(muted, 0.12)
-      onTap: androidApp("works.jubilee.timetree")
-
-      Box {
-        width: 3
-        height: 20
-        radius: 1.5
-        background: ev.color ?? ttColor
-      }
-
-      Column {
-        gap: 0
-        weight: 1
-        Row {
-          gap: 4
-          Text { text: ev.time ?? "All day"; fontSize: 9; color: muted; width: 42 }
-          if ev.calendar != null {
-            Text { text: "· ${ev.calendar}"; fontSize: 9; color: alpha(foreground, 0.45); weight: 1; maxLines: 1 }
-          }
-        }
-        Text { text: ev.title; fontSize: 10; bold: true; maxLines: 1 }
-      }
-    }
-  }
-
-  Column {
-    gap: 4
-
-    // Top Header: TimeTree Logo, Title, Month Switcher, App Launcher
-    Row {
-      gap: 6
-      align: center
-
-      Row {
-        gap: 4
-        align: center
-        width: 86
-        onTap: androidApp("works.jubilee.timetree")
-        TreeLogo { sz: 18 }
-        Text { text: "TimeTree"; fontSize: 12; bold: true; color: ttColor; width: 64; maxLines: 1 }
-      }
-
-      Row {
-        gap: 2
-        align: center
-        width: 128
-        Box {
-          size: 18
-          radius: 3
-          background: alpha(muted, 0.2)
-          align: center
-          onTap: offset = max(-3, offset - 1)
-          Text { text: "‹"; fontSize: 11; bold: true; align: center }
-        }
-        Text {
-          text: monthLabel
-          fontSize: 11
-          bold: true
-          width: 86
-          align: center
-          maxLines: 1
-          onTap: offset = 0
-        }
-        Box {
-          size: 18
-          radius: 3
-          background: alpha(muted, 0.2)
-          align: center
-          onTap: offset = min(3, offset + 1)
-          Text { text: "›"; fontSize: 11; bold: true; align: center }
-        }
-      }
-
-      if offset != 0 {
-        Box {
-          padding: [4, 2]
-          radius: 3
-          background: alpha(ttColor, 0.2)
-          align: center
-          onTap: offset = 0
-          Text { text: "Today"; fontSize: 9; color: ttColor; bold: true; width: 28; align: center }
-        }
-      }
-
-      Spacer { weight: 1 }
-
-      Box {
-        padding: [6, 3]
-        radius: 4
-        background: ttColor
-        align: center
-        onTap: screen()
-        Text { text: "Open"; fontSize: 10; bold: true; color: #ffffff; width: 28; align: center }
-      }
-    }
-
-    // TimeTree notification banner if any active notification exists
-    if len(ttNotifs) > 0 {
-      Row {
-        gap: 4
-        align: center
-        padding: [4, 2]
-        radius: 4
-        background: alpha(ttColor, 0.2)
-        onTap: notification("open", ttNotifs[0].key)
-        Text { text: ttNotifs[0].title; fontSize: 10; bold: true; width: 90; maxLines: 1 }
-        Text { text: ttNotifs[0].text; fontSize: 10; color: muted; weight: 1; maxLines: 1 }
-      }
-    }
-
-    // Main Content: Side-by-side Calendar and Agenda
-    Row {
-      gap: 8
-      weight: 1
-
-      // Left Column: Calendar Grid
-      Column {
-        width: 195
-        gap: 1
-
-        // Weekday headers
-        Row {
-          for w, i in ["S", "M", "T", "W", "T", "F", "S"] {
-            Text {
-              text: w
-              weight: 1
-              fontSize: 9
-              bold: true
-              align: center
-              color: i == 0 ? red : (i == 6 ? cyan : muted)
-            }
-          }
-        }
-
-        Spacer { height: 1 }
-
-        // Weeks
-        for week in monthWeeks {
-          Row {
-            for day in week.days key day.date {
-              DayCell { day: day }
-            }
-          }
-        }
-      }
-
-      // Divider
-      Spacer { width: 1; fill: height; background: alpha(muted, 0.25) }
-
-      // Right Column: Selected Day's Events Agenda
-      Column {
-        weight: 1
-        gap: 3
-
-        Row {
-          align: center
-          Text {
-            text: activeDate == todayDate ? "Today" : sub(activeDate, 5, 10)
-            fontSize: 11
-            bold: true
-            weight: 1
-            maxLines: 1
-          }
-          if activeDate != todayDate {
-            Box {
-              padding: [3, 1]
-              radius: 3
-              background: alpha(ttColor, 0.2)
-              align: center
-              onTap: selectedDate = todayDate
-              Text { text: "Today"; fontSize: 8; color: ttColor; bold: true; width: 26; align: center }
-            }
-          }
-          Text {
-            text: "${len(dayEvents)} ev"
-            fontSize: 9
-            color: muted
-            width: 26
-            align: end
-          }
-        }
-
-        Column {
-          scroll: true
-          weight: 1
-          gap: 3
-
-          if len(dayEvents) > 0 {
-            for ev in dayEvents key ev.id {
-              EventItem { ev: ev }
-            }
-          } else {
-            Column {
-              align: center
-              justify: center
-              weight: 1
-              gap: 4
-              Text { text: "No events"; fontSize: 10; color: muted; align: center }
-              Button {
-                text: "+ TimeTree"
-                color: ttColor
-                onTap: androidApp("works.jubilee.timetree")
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Full-screen Screen View
-  screen {
-    title: "TimeTree Schedule"
-
+  // The tile: the picked day (today until a day is tapped) and its events on the left, the month on the right.
+  Row {
+    gap: 16
+    fill: true
     Column {
-      scroll: true
-      gap: 12
-      padding: 12
-
-      // Screen Header
+      gap: 2
+      weight: 1
+      fill: height
       Row {
-        gap: 8
+        gap: 6
         align: center
-        TreeLogo { sz: 28 }
+        TreeLogo { sz: 14 }
+        Text { text: "TIMETREE"; style: label; color: muted; weight: 1; maxLines: 1 }
+      }
+      Text { text: dayTitle; fontSize: 40; maxLines: 1 }
+      Text { text: len(dayEvents) == 0 ? "No events" : "${len(dayEvents)} event${len(dayEvents) == 1 ? "" : "s"}"; style: small; color: muted; maxLines: 1 }
+      Spacer { height: 4 }
+      for ev in dayEvents.take(max((rows ?? 4) * 3 - 8, 1)) key ev.id {
+        Row {
+          gap: 6
+          align: center
+          Spacer { width: 3; height: 14; radius: 1.5; background: ev.color ?? accent }
+          Text { text: "${ev.time ?? "All day"} · ${ev.title}"; style: small; weight: 1; maxLines: 1 }
+        }
+      }
+      Spacer { weight: 1 }
+      if len(ttNotifs) > 0 {
+        Text { text: ttNotifs[0].title + (ttNotifs[0].text != "" ? " · " + ttNotifs[0].text : ""); style: small; color: accent; maxLines: 1; onTap: notification("open", ttNotifs[0].key) }
+      }
+    }
+
+    // The month; a tap on a day shows it on the left.
+    Column {
+      width: 180
+      gap: 1
+      Text { text: monthLabel; style: small; bold: true; maxLines: 1 }
+      Spacer { height: 2 }
+      Row {
+        gap: 0
+        for w, i in ["S", "M", "T", "W", "T", "F", "S"] {
+          Text { text: w; weight: 1; style: label; align: center; maxLines: 1; color: i == 0 ? red : (i == 6 ? cyan : muted) }
+        }
+      }
+      for week in monthWeeks {
+        Row {
+          gap: 0
+          for day in week.days key day.date {
+            DayCell { day: day }
+          }
+        }
+      }
+    }
+  }
+
+  component Month() {
+    Column {
+      gap: 12
+      Row {
+        align: center
+        gap: 6
         Column {
           gap: 0
           weight: 1
-          Text { text: "TimeTree"; fontSize: 18; bold: true; color: ttColor }
-          Text { text: "Shared Calendar & Schedule"; style: small; color: muted }
+          Text { text: words(monthLabel)[0]; fontSize: (screenWidth ?? 360) < 420 ? 24 : 30; bold: true; maxLines: 1 }
+          Text { text: words(monthLabel)[1] ?? ""; fontSize: 16; color: muted; maxLines: 1 }
         }
-        Row {
-          gap: 6
-          Button {
-            text: "Open App"
-            color: ttColor
-            onTap: androidApp("works.jubilee.timetree")
-          }
-        }
+        Text { text: "‹"; fontSize: 20; align: center; width: 48; color: offset <= -3 ? muted : foreground; background: surface; radius: 24; padding: [0, 10]; onTap: offset = max(-3, offset - 1) }
+        Text { text: "Today"; fontSize: 16; align: center; width: 84; maxLines: 1; color: offset == 0 && activeDate == todayDate ? muted : background; background: offset == 0 && activeDate == todayDate ? surface : accent; radius: 24; padding: [0, 14]; onTap: { offset = 0; selectedDate = "" } }
+        Text { text: "›"; fontSize: 20; align: center; width: 48; color: offset >= 3 ? muted : foreground; background: surface; radius: 24; padding: [0, 10]; onTap: offset = min(3, offset + 1) }
       }
-
-      Spacer { height: 1; fill: width; background: alpha(muted, 0.3) }
-
-      // Month Selector
-      Row {
-        gap: 8
-        align: center
-        Box {
-          width: 70
-          height: 28
-          radius: 4
-          background: alpha(muted, 0.2)
-          align: center
-          onTap: offset = max(-3, offset - 1)
-          Text { text: "‹ Prev"; fontSize: 12; bold: true; align: center }
+      Grid {
+        columns: 7
+        gap: 4
+        for w, i in ["S", "M", "T", "W", "T", "F", "S"] {
+          Text { text: w; style: label; align: center; color: i == 0 ? red : (i == 6 ? cyan : muted) }
         }
-        Text { text: monthLabel; fontSize: 15; bold: true; weight: 1; align: center }
-        Box {
-          width: 70
-          height: 28
-          radius: 4
-          background: alpha(muted, 0.2)
-          align: center
-          onTap: offset = min(3, offset + 1)
-          Text { text: "Next ›"; fontSize: 12; bold: true; align: center }
-        }
-        if offset != 0 {
-          Box {
-            width: 50
-            height: 28
-            radius: 4
-            background: ttColor
-            align: center
-            onTap: offset = 0
-            Text { text: "Today"; fontSize: 11; bold: true; color: #ffffff; align: center }
-          }
-        }
-      }
-
-      // Large Full Calendar
-      Column {
-        gap: 3
-        padding: 8
-        border: 1
-        borderColor: alpha(muted, 0.3)
-        radius: 8
-
-        Row {
-          for w in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] {
-            Text {
-              text: w
-              weight: 1
-              fontSize: 11
-              bold: true
-              align: center
-              color: w == "Sun" ? red : (w == "Sat" ? cyan : muted)
-            }
-          }
-        }
-
-        Spacer { height: 4 }
-
         for week in monthWeeks {
-          Row {
-            for day in week.days key day.date {
-              let isSel = day.date == activeDate
-              let dayCol = !day.cur ? alpha(foreground, 0.3) : (day.dow == 0 ? red : (day.dow == 6 ? cyan : foreground))
+          for day in week.days key day.date {
+            let isSel = day.date == activeDate
+            Box {
+              height: cell; radius: cell / 2; align: center
+              background: isSel ? accent : transparent
+              border: day.today && !isSel ? 1 : 0; borderColor: accent
+              onTap: selectedDate = day.date
               Column {
-                weight: 1
+                gap: 0
                 align: center
-                padding: [2, 4]
-                radius: 6
-                background: isSel ? alpha(ttColor, 0.15) : transparent
-                onTap: selectedDate = day.date
-
-                Box {
-                  size: 26
-                  radius: 13
-                  background: day.today ? ttColor : transparent
-                  align: center
-                  Text {
-                    text: str(day.d)
-                    fontSize: 12
-                    bold: day.today || isSel
-                    color: day.today ? #ffffff : dayCol
-                  }
-                }
-
+                Text { text: str(day.d); align: center; color: isSel ? background : !day.cur ? alpha(foreground, 0.3) : (day.dow == 0 ? red : (day.dow == 6 ? cyan : foreground)) }
                 Row {
                   gap: 2
-                  height: 6
+                  height: 4
                   align: center
                   if day.count > 0 {
-                    Box { size: 4; radius: 2; background: day.colors[0] ?? ttColor }
+                    Spacer { size: 4; radius: 2; background: isSel ? background : day.colors[0] ?? accent }
                   }
                   if day.count > 1 {
-                    Box { size: 4; radius: 2; background: day.colors[1] ?? #f59e0b }
+                    Spacer { size: 4; radius: 2; background: isSel ? background : day.colors[1] ?? accent }
                   }
                 }
               }
@@ -521,92 +276,115 @@ widget "timetree" {
           }
         }
       }
+    }
+  }
 
-      // Agenda for Selected Day
-      Column {
-        gap: 8
-        padding: 10
-        border: 1
-        borderColor: alpha(muted, 0.3)
-        radius: 8
-
-        Row {
-          align: center
-          Text { text: "Schedule · ${activeDate}"; fontSize: 14; bold: true; weight: 1; maxLines: 1 }
-          Text { text: "${len(dayEvents)} events"; fontSize: 12; color: muted; width: 65; align: end }
-        }
-
-        if len(dayEvents) > 0 {
-          for ev in dayEvents key ev.id {
+  component Day() {
+    Column {
+      gap: 12
+      Text { text: activeDate == todayDate ? "Today" : fmtTime(parseTime(activeDate, "yyyy-MM-dd"), "EEEE d MMMM"); fontSize: 14; bold: true; color: accent; padding: [4, 0, 0, 0] }
+      Box {
+        fill: width
+        align: bottomEnd
+        Column {
+          gap: 0
+          fill: width
+          background: surface; radius: 28; clip: true
+          for ev, n in dayEvents key ev.id {
+            Spacer { height: 1; fill: width; background: border; visible: n > 0 }
             Row {
-              gap: 8
+              gap: 16
               align: center
-              padding: [8, 6]
-              radius: 6
-              background: alpha(muted, 0.15)
-              Box { width: 4; height: 28; radius: 2; background: ev.color ?? ttColor }
+              padding: [20, 14]
+              onTap: androidApp("works.jubilee.timetree")
+              Spacer { width: 4; height: 36; radius: 2; background: ev.color ?? accent }
+              Text { text: ev.time ?? "All day"; fontSize: 16; color: muted; width: 60; maxLines: 1 }
               Column {
-                gap: 1
+                gap: 0
                 weight: 1
-                Row {
-                  gap: 6
-                  Text { text: ev.time ?? "All day"; fontSize: 11; bold: true; color: ttColor; width: 50 }
-                  if ev.calendar != null {
-                    Text { text: "· ${ev.calendar}"; fontSize: 11; color: muted; weight: 1; maxLines: 1 }
-                  }
-                }
-                Text { text: ev.title; fontSize: 13; bold: true; maxLines: 1 }
-              }
-              Box {
-                width: 48
-                height: 26
-                radius: 4
-                background: alpha(ttColor, 0.2)
-                align: center
-                onTap: androidApp("works.jubilee.timetree")
-                Text { text: "Open"; fontSize: 10; bold: true; color: ttColor; align: center }
+                Text { text: ev.title; fontSize: 16; maxLines: 2 }
+                Text { text: ev.calendar ?? ""; fontSize: 14; color: muted; maxLines: 1; visible: ev.calendar != null }
               }
             }
           }
-        } else {
-          Text { text: "No events on this day."; fontSize: 12; color: muted }
+          if len(dayEvents) == 0 { Text { text: "Nothing planned."; fontSize: 16; color: muted; padding: [20, 16] } }
+          // Room at the end, so the add button never covers the last event.
+          Spacer { height: 80 }
         }
-      }
-
-      // Quick Add Event Form
-      Column {
-        gap: 6
-        padding: 10
-        border: 1
-        borderColor: alpha(muted, 0.3)
-        radius: 8
-
-        Text { text: "Manage Events for ${activeDate}"; fontSize: 13; bold: true }
-        Row {
-          gap: 6
-          align: center
-          Button {
-            text: "+ Add Event in TimeTree App"
-            color: ttColor
-            weight: 1
+        // Events are added in TimeTree, which keeps the shared calendar.
+        Box {
+          padding: 16
+          Box {
+            size: 56; radius: 16; align: center; background: accent
             onTap: androidApp("works.jubilee.timetree")
+            Text { text: "+"; fontSize: 32; color: background; align: center; fill: width }
           }
         }
       }
+    }
+  }
 
-      // Bottom Action buttons
+  component More() {
+    Column {
+      gap: 12
+      if len(ttNotifs) > 0 {
+        Text { text: "From TimeTree"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface; radius: 28; clip: true
+          for nt, k in ttNotifs key nt.key {
+            Spacer { height: 1; fill: width; background: border; visible: k > 0 }
+            Column {
+              gap: 0
+              padding: [20, 14]
+              onTap: notification("open", nt.key)
+              Text { text: nt.title; fontSize: 16; maxLines: 1 }
+              Text { text: nt.text; fontSize: 14; color: muted; maxLines: 2; visible: nt.text != "" }
+            }
+          }
+        }
+      }
+      Text { text: "Events"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
       Row {
-        gap: 8
-        Button {
-          text: "Edit Events"
+        gap: 16
+        align: center
+        padding: [20, 14]
+        background: surface; radius: 28
+        onTap: terminal('$EDITOR ~/.config/timetree/events.json', "TimeTree Events")
+        Column {
+          gap: 0
           weight: 1
-          onTap: terminal('$EDITOR ~/.config/timetree/events.json', "TimeTree Events")
+          Text { text: "Edit the events file"; fontSize: 16; maxLines: 1 }
+          Text { text: "~/.config/timetree/events.json"; fontSize: 14; color: muted; maxLines: 1 }
         }
-        Button {
-          text: "Close"
-          weight: 1
-          onTap: close()
+        Text { text: "›"; fontSize: 18; color: muted }
+      }
+      Text { text: "Open TimeTree"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: androidApp("works.jubilee.timetree") }
+    }
+  }
+
+  screen {
+    title: "TimeTree"
+    Column {
+      scroll: true
+      gap: 14
+      padding: [0, 4, 0, 24]
+      if twoCols {
+        Row {
+          gap: 24
+          align: top
+          Month { weight: 1 }
+          Column {
+            gap: 14
+            weight: 1
+            Day { }
+            More { }
+          }
         }
+      } else {
+        Month { }
+        Day { }
+        More { }
       }
     }
   }

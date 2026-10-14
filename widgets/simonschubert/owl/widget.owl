@@ -1,5 +1,5 @@
 widget "owl" {
-  meta { description: "A pixel owl to look after. Tap to hatch it, feed it and pet it; it sleeps at night and dances to your music"; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "A pixel owl to look after. Tap to hatch it, feed it and pet it; it sleeps at night and dances to your music"; version: "1.2"; license: "MIT"; category: "fun" }
   page: 2
   order: 1
   size: 3x3
@@ -78,11 +78,15 @@ widget "owl" {
     h: red, c: mix(orange, yellow, 0.4), d: mix(orange, background, 0.6)
   }
 
-  Column {
-    gap: 2
+  let small = (rows ?? 3) < 3 || (cols ?? 3) < 3
+  let hatchedOn = hatched ? fmtTime(born, "d MMM yyyy") : ""
+
+  onTap: screen()
+
+  // The owl on its branch: a tap hatches, feeds or pets it. The same in the tile and the screen.
+  component Owl() {
     Canvas {
-      weight: 1
-      fill: width
+      fill: true
       onTap: {
         tapKind = !hatched ? "hatch" : asleep ? "peek" : hungry ? "feed" : "pet"
         tapAt = time
@@ -262,26 +266,103 @@ widget "owl" {
         }
       }
     }
+  }
+
+  Column {
+    gap: 2
+    fill: true
+    if !small {
+      Row {
+        align: center
+        Text { text: "OWL"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: hatched ? "DAY ${day}" : ""; style: label; color: accent; maxLines: 1; width: 64; align: end }
+      }
+    }
+    Owl { weight: 1; fill: width }
     Text {
-      font: mono
       style: small
       color: muted
       align: center
+      fill: width
       maxLines: 1
       // A 2-column tile fits about 16 letters.
-      text: cols != null && cols < 3 ?
-        (mood == "egg" ? "tap to hatch"
-        : mood == "asleep" ? "zzz · day ${day}"
-        : mood == "hungry" ? "tap to feed"
-        : mood == "dancing" ? "♪ ${lower(m.title ?? "music")}"
-        : mood == "tired" ? "tired · ${bat.level}%"
-        : "day ${day} · ♥︎${pets}")
-        : mood == "egg" ? "an egg · tap to hatch"
-        : mood == "asleep" ? "zzz · day ${day}"
-        : mood == "hungry" ? "hungry · tap to feed"
-        : mood == "dancing" ? "♪ ${lower(m.title ?? "music")}"
-        : mood == "tired" ? "tired · battery ${bat.level}%"
-        : "day ${day} · fed ${ago} ago · ♥︎${pets}"
+      text: small ?
+        (mood == "egg" ? "Tap to hatch"
+        : mood == "asleep" ? "Zzz · day ${day}"
+        : mood == "hungry" ? "Tap to feed"
+        : mood == "dancing" ? "♪ ${m.title ?? "Music"}"
+        : mood == "tired" ? "Tired · ${bat.level}%"
+        : "Day ${day} · ♥︎${pets}")
+        : mood == "egg" ? "An egg · tap to hatch"
+        : mood == "asleep" ? "Asleep until 7"
+        : mood == "hungry" ? "Hungry · tap to feed"
+        : mood == "dancing" ? "♪ ${m.title ?? "Music"}"
+        : mood == "tired" ? "Tired · battery ${bat.level}%"
+        : "Fed ${ago} ago · ♥︎${pets}"
+    }
+  }
+
+  screen {
+    title: "owl"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: hatched ? "Day ${day}" : "An egg"; fontSize: 48; bold: true; maxLines: 1 }
+        Text {
+          text: mood == "egg" ? "Tap it to hatch" : mood == "asleep" ? "Asleep until 7 · a tap wakes it for a peek" : mood == "hungry" ? "Hungry · tap it to feed it" : mood == "dancing" ? "Dancing to ${m.title ?? "your music"}" : mood == "tired" ? "Tired: the battery is at ${bat.level}%" : "Content · tap it to pet it"
+          fontSize: 16; color: muted; maxLines: 2
+        }
+      }
+      Column {
+        background: surface
+        radius: 28
+        clip: true
+        padding: [20, 16]
+        Owl { height: 300; fill: width }
+      }
+      if hatched {
+        Text { text: "How it's doing"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Text { text: "Fed"; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: hungry ? "${ago} ago · hungry" : "${ago} ago"; fontSize: 16; color: hungry ? red : muted; maxLines: 1 }
+          }
+          Spacer { height: 1; fill: width; background: border }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Text { text: "Pets"; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: "♥︎ ${pets}"; fontSize: 16; color: muted; maxLines: 1 }
+          }
+          Spacer { height: 1; fill: width; background: border }
+          Row {
+            gap: 16
+            align: center
+            padding: [20, 14]
+            Text { text: "Hatched"; fontSize: 16; maxLines: 1; weight: 1 }
+            Text { text: hatchedOn; fontSize: 16; color: muted; maxLines: 1 }
+          }
+        }
+      }
+      Text { text: "Its day"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface
+        radius: 28
+        clip: true
+        Text { text: "It sleeps from 23 to 7 and gets hungry 8 hours after a meal. It dances while music plays and tires when the battery is under 20%."; fontSize: 16; color: muted; padding: [20, 14] }
+      }
     }
   }
 }

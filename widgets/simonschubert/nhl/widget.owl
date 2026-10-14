@@ -1,8 +1,8 @@
 widget "nhl" {
   meta {
-    owl: 5
+    owl: 8
     description: "NHL scores from ESPN with team logos: live games first, then last night's finals and tonight's puck drops. Tap for every game and both conference standings"
-    version: "1.0"
+    version: "1.1"
     license: "MIT"
     category: "world"
   }
@@ -49,19 +49,28 @@ widget "nhl" {
   """) every 30m json timeout 120s
   source now = clock every 1m
 
+  // The tab the app shows on a phone: "scores" or "standings".
   state view = "scores"
 
   let all = games ?? []
   let live = all.filter(g => g.state == 'in')
   let done = all.filter(g => g.state == 'post').reverse()
   let next = all.filter(g => g.state == 'pre')
-  let cap = clamp((rows ?? 4) * 3 - 2, 5, 14)
+  // Live games first, then the latest finals and the next puck drops: the one up front and two more at 3 rows, three more per row after that.
+  let cap = max((rows ?? 4) * 3 - 6, 1)
   let picked = flatten([live, done.take(ceil(cap / 2)), next]).take(cap)
   let groups = table ?? []
   let wide = max(max(screenWidth ?? 0, tileWidth ?? 0), 240) >= 280
+  let twoCols = (screenWidth ?? 0) > 600
   // A line under the last playoff seed.
   let cuts = [8]
-  let bLabel = "PTS"
+
+  // The game up front: its score, or when the puck drops.
+  let feat = picked[0]
+  let fAway = feat.teams.find(t => t.side == 'away') ?? feat.teams[1]
+  let fHome = feat.teams.find(t => t.side == 'home') ?? feat.teams[0]
+  let fBig = feat == null ? (games == null ? "…" : "No games") : feat.state == 'pre' ? fmtTime(feat.at, "HH:mm") : "${fAway.score ?? '–'}–${fHome.score ?? '–'}"
+  let fWhen = feat == null ? "" : feat.state == 'pre' ? fmtTime(feat.at, "EEEE d MMM") : feat.detail
 
   component Badge(logo, px = 18) {
     if logo {
@@ -86,6 +95,7 @@ widget "nhl" {
     // logos and names line up down the list.
     Row {
       gap: wide ? 8 : 4
+      align: center
       Badge { logo: away.logo; px: px }
       Text { text: wide ? away.name : away.abbr; style: small; weight: 1; maxLines: 1; color: final && !away.winner ? muted : foreground }
       if g.state == 'pre' {
@@ -93,11 +103,11 @@ widget "nhl" {
       } else {
         Row {
           width: ctrW; gap: 0; align: center
-          Text { text: away.score ?? '–'; style: small; width: scW; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground }
-          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : rgb(0, 0, 0, 0) }
+          Text { text: away.score ?? '–'; style: small; width: scW; align: end; bold: final && away.winner; color: live ? accent : final && !away.winner ? muted : foreground; maxLines: 1 }
+          Box { width: dotW; height: 5; radius: 2.5; background: live ? accent : transparent }
           Text { text: g.detail; style: small; width: stW; align: center; color: live ? accent : muted; maxLines: 1 }
           Box { width: dotW }
-          Text { text: home.score ?? '–'; style: small; width: scW; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground }
+          Text { text: home.score ?? '–'; style: small; width: scW; align: start; bold: final && home.winner; color: live ? accent : final && !home.winner ? muted : foreground; maxLines: 1 }
         }
       }
       Text { text: wide ? home.name : home.abbr; style: small; weight: 1; maxLines: 1; align: end; color: final && !home.winner ? muted : foreground }
@@ -107,68 +117,134 @@ widget "nhl" {
 
   component TeamRow(t) {
     Row {
-      gap: 6
-      Text { text: t.seed < 99 ? t.seed : '–'; width: 20; style: small; color: muted; align: end }
-      Badge { logo: t.logo; px: 16 }
-      Text { text: wide ? t.name : t.abbr; weight: 1; style: small; maxLines: 1 }
-      Text { text: t.rec; width: 56; style: small; bold: true; align: end }
-      Text { text: t.b ?? '–'; width: 36; style: small; color: muted; align: end }
+      gap: 8
+      align: center
+      Text { text: t.seed < 99 ? t.seed : '–'; width: 22; fontSize: 14; color: muted; align: end; maxLines: 1 }
+      Badge { logo: t.logo; px: 20 }
+      Text { text: wide ? t.name : t.abbr; weight: 1; fontSize: 16; maxLines: 1 }
+      Text { text: t.rec; width: 64; fontSize: 14; align: end; maxLines: 1 }
+      Text { text: t.b ?? '–'; width: 36; fontSize: 16; bold: true; align: end; maxLines: 1 }
     }
   }
 
+  // Both conferences, in seed order, a line in accent under the last playoff spot.
   component Standings() {
-    for grp in groups {
-      Row {
-        Text { text: grp.name; style: label; color: muted; weight: 1 }
-        Text { text: bLabel; style: label; color: muted; width: 36; align: end }
+    Column {
+      gap: 12
+      for grp in groups {
+        Row {
+          align: center
+          padding: [4, 8, 20, 0]
+          Text { text: grp.name; fontSize: 14; bold: true; color: accent; weight: 1; maxLines: 1 }
+          Text { text: "Points"; fontSize: 14; color: muted; maxLines: 1 }
+        }
+        Column {
+          gap: 0
+          background: surface
+          radius: 28
+          clip: true
+          for t, i in grp.teams key t.id {
+            Spacer { height: i > 0 && cuts.contains(i) ? 2 : 1; fill: width; background: i > 0 && cuts.contains(i) ? accent : border; visible: i > 0 }
+            TeamRow { t: t; padding: [16, 12, 20, 12] }
+          }
+        }
       }
-      for t, i in grp.teams key t.id {
-        if i > 0 && cuts.contains(i) { Box { height: 7; fill: width  Row { width: 32; height: 1; background: border } } }
-        TeamRow { t: t }
+      if len(groups) == 0 {
+        Text { text: table == null ? "Loading the standings…" : "No standings."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
+      }
+    }
+  }
+
+  // Every game from yesterday to tomorrow: live, final, then coming up.
+  component Scores() {
+    Column {
+      gap: 12
+      for sec in [{name: "Live", list: live}, {name: "Final", list: done}, {name: "Coming up", list: next}] {
+        if len(sec.list) > 0 {
+          Text { text: sec.name; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+          Column {
+            gap: 0
+            background: surface
+            radius: 28
+            clip: true
+            for g, i in sec.list key g.id {
+              Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+              GameRow { g: g; padding: [20, 14] }
+            }
+          }
+        }
+      }
+      if len(all) == 0 {
+        Text { text: games == null ? "Loading the scoreboard…" : "No games yesterday, today or tomorrow."; fontSize: 16; color: muted; padding: [4, 8, 0, 0] }
       }
     }
   }
 
   onTap: screen()
 
+  // The tile: the game up front big, the teams and its state under it, then the rest as rows allow.
   Column {
+    gap: 2
+    fill: true
     Row {
-      Text { text: "NHL"; style: title; weight: 1; maxLines: 1 }
-      if count(live) > 0 {
-        Text { text: "${count(live)} live"; style: small; color: accent; width: 60; align: end; bold: true }
-      } else {
-        Text { text: fmtTime(now, "EEE d"); style: small; color: muted; width: 60; align: end }
+      align: center
+      Text { text: "NHL"; style: label; color: muted; weight: 1; maxLines: 1 }
+      Text { text: len(live) > 0 ? "${len(live)} LIVE" : upper(fmtTime(now, "EEE d")); style: label; color: len(live) > 0 ? accent : muted; width: 64; align: end; maxLines: 1 }
+    }
+    Row {
+      gap: 6
+      align: center
+      Text { text: fBig; fontSize: 40; color: feat.state == 'in' ? accent : foreground; weight: 1; maxLines: 1 }
+      if feat != null {
+        Badge { logo: fAway.logo; px: 24 }
+        Badge { logo: fHome.logo; px: 24 }
       }
     }
-    Row {
-      Button { text: "scores"; weight: 1; color: view == "scores" ? accent : muted; onTap: view = "scores" }
-      Button { text: "standings"; weight: 1; color: view == "standings" ? accent : muted; onTap: view = "standings" }
-    }
-    Column {
-      weight: 1
-      scroll: true
-      if view == "scores" {
-        if count(picked) == 0 {
-          Text { text: games == null ? "loading…" : "no games today"; style: small; color: muted }
-        } else {
-          for g in picked key g.id { GameRow { g: g } }
-        }
-      } else {
-        Standings {}
-      }
-    }
+    Text { text: feat == null ? (games == null ? "Loading the scoreboard" : "Nothing from yesterday to tomorrow") : "${(cols ?? 3) >= 5 ? fAway.name : fAway.abbr} at ${(cols ?? 3) >= 5 ? fHome.name : fHome.abbr}"; style: small; color: muted; maxLines: 1 }
+    Text { text: fWhen; style: small; color: feat.state == 'in' ? accent : muted; maxLines: 1; visible: feat != null }
+    Spacer { weight: 1 }
+    for g in picked.drop(1) key g.id { GameRow { g: g } }
   }
 
   screen {
     title: "NHL"
     Column {
       scroll: true
-      Text { text: "scores"; style: title }
-      if count(all) == 0 { Text { text: "no games today"; style: small; color: muted } }
-      for g in all key g.id { GameRow { g: g } }
-      Text { text: "standings"; style: title }
-      Standings {}
-      Button { text: "close"; onTap: close() }
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Row {
+          gap: 12
+          align: center
+          Text { text: fBig; fontSize: 48; bold: true; color: feat.state == 'in' ? accent : foreground; weight: 1; maxLines: 1 }
+          if feat != null {
+            Badge { logo: fAway.logo; px: 40 }
+            Badge { logo: fHome.logo; px: 40 }
+          }
+        }
+        Text { text: feat == null ? "Nothing from yesterday to tomorrow" : "${fAway.name} at ${fHome.name} · ${fWhen}"; fontSize: 16; color: feat.state == 'in' ? accent : muted; maxLines: 2 }
+      }
+      if twoCols {
+        Row {
+          gap: 24
+          align: top
+          Scores { weight: 1 }
+          Standings { weight: 1 }
+        }
+      } else {
+        Row {
+          gap: 8
+          for v in ["scores", "standings"] {
+            Text { text: v == "scores" ? "Scores" : "Standings"; fontSize: 15; weight: 1; align: center; maxLines: 1; radius: 20; padding: [0, 10]; background: view == v ? mix(surface, accent, 0.22) : transparent; color: view == v ? foreground : muted; onTap: view = v }
+          }
+        }
+        if view == "scores" {
+          Scores { }
+        } else {
+          Standings { }
+        }
+      }
     }
   }
 }

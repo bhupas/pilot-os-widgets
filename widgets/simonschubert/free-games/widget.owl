@@ -1,5 +1,5 @@
 widget "free games" {
-  meta { description: "Games free to keep on the Epic Games Store right now and the ones coming next"; version: "1.1"; license: "MIT"; category: "fun" }
+  meta { owl: 8; description: "Games free to keep on the Epic Games Store right now and the ones coming next"; version: "1.2"; license: "MIT"; category: "fun" }
   size: 6x3
   minSize: 3x2
 
@@ -16,37 +16,103 @@ widget "free games" {
       ] | sort_by(.state != "now", .until)'
   """) every 1h json timeout 20s
   source now = clock every 60s
-  let live = games.filter(g => g.state == "now" && g.until > now)
-  let soon = games.filter(g => g.state == "next" && g.from > now)
+  let live = (games ?? []).filter(g => g.state == "now" && g.until > now)
+  let soon = (games ?? []).filter(g => g.state == "next" && g.from > now)
+  let short = (rows ?? 3) < 3
+  let wide = (screenWidth ?? 0) > 600
 
-  onTap: url("https://store.epicgames.com/free-games")
+  onTap: screen()
 
+  // The tile: today's free game, how long it stays free, then the rest as rows allow.
   Column {
-    gap: 4
-    Text { text: "free games · epic"; style: muted }
-    Column {
-      scroll: true
-      weight: 1
-      gap: 6
-      if live != null && len(live) == 0 { Text { text: "nothing free right now"; style: small } }
-      for g in live key g.url {
-        Column {
-          gap: 0
-          onTap: url(g.url)
-          Text { text: g.title; fontSize: 14; bold: true; color: green; maxLines: 1 }
-          Text { text: "free for ${fmtDuration(g.until - now)}"; fontSize: 11; color: muted }
-        }
+    gap: 2
+    fill: true
+    if !short {
+      Row {
+        align: center
+        Text { text: "FREE GAMES"; style: label; color: muted; weight: 1; maxLines: 1 }
+        Text { text: "EPIC"; style: label; color: accent; maxLines: 1; width: 40; align: end }
       }
-      if len(soon) > 0 {
-        Text { text: "next"; style: label }
-        for g in soon key g.url {
-          Row {
+    }
+    Text { text: games == null ? null : len(live) == 0 ? "Nothing free" : live[0].title; fontSize: 20; bold: true; maxLines: 1 }
+    Text { text: games == null ? "Loading…" : len(live) == 0 ? (len(soon) > 0 ? "Next: ${soon[0].title}, ${fmtTime(soon[0].from, "EEE d MMM")}" : "Check back later") : "Free for ${fmtDuration(live[0].until - now)}"; style: small; color: muted; maxLines: 1 }
+    Spacer { weight: 1 }
+    for g in (live.drop(1) + soon).take(max((rows ?? 3) * 3 - 7, 0)) key g.url {
+      Row {
+        gap: 8
+        align: center
+        Text { text: g.title; style: small; weight: 1; maxLines: 1 }
+        Text { text: g.state == "now" ? "Free now" : fmtTime(g.from, "EEE d MMM"); style: small; color: g.state == "now" ? green : muted; width: 80; align: end; maxLines: 1 }
+      }
+    }
+  }
+
+  component FreeNow() {
+    Column {
+      gap: 12
+      Text { text: "Free now"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        if len(live) == 0 { Text { text: games == null ? "Loading…" : "Nothing free right now."; fontSize: 16; color: muted; padding: [20, 16] } }
+        for g, i in live key g.url {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 0
+            padding: [20, 14]
             onTap: url(g.url)
-            Text { text: g.title; fontSize: 12; maxLines: 1; weight: 1 }
-            Text { text: fmtTime(g.from, "EEE d MMM"); fontSize: 11; color: muted; width: 80; align: end }
+            Text { text: g.title; fontSize: 16; maxLines: 2 }
+            Text { text: "Free for ${fmtDuration(g.until - now)} · until ${fmtTime(g.until, "EEE d MMM HH:mm")}"; fontSize: 14; color: green; maxLines: 1 }
           }
         }
       }
+    }
+  }
+
+  component Next() {
+    Column {
+      gap: 12
+      Text { text: "Coming next"; fontSize: 14; bold: true; color: accent; padding: [4, 8, 0, 0] }
+      Column {
+        gap: 0
+        background: surface; radius: 28; clip: true
+        if len(soon) == 0 { Text { text: "Nothing announced yet."; fontSize: 16; color: muted; padding: [20, 16] } }
+        for g, i in soon key g.url {
+          Spacer { height: 1; fill: width; background: border; visible: i > 0 }
+          Column {
+            gap: 0
+            padding: [20, 14]
+            onTap: url(g.url)
+            Text { text: g.title; fontSize: 16; maxLines: 2 }
+            Text { text: "Free from ${fmtTime(g.from, "EEE d MMM")} to ${fmtTime(g.until, "EEE d MMM")}"; fontSize: 14; color: muted; maxLines: 1 }
+          }
+        }
+      }
+    }
+  }
+
+  screen {
+    title: "free games"
+    Column {
+      scroll: true
+      gap: 12
+      padding: [0, 4, 0, 24]
+      Column {
+        gap: 0
+        Text { text: games == null ? "…" : "${len(live)} free"; fontSize: 48; bold: true; maxLines: 1 }
+        Text { text: "To keep, on the Epic Games Store" + (len(soon) > 0 ? " · ${len(soon)} more coming" : ""); fontSize: 16; color: muted }
+      }
+      if wide {
+        Row {
+          gap: 24
+          FreeNow { weight: 1 }
+          Next { weight: 1 }
+        }
+      } else {
+        FreeNow { }
+        Next { }
+      }
+      Text { text: "Open the store"; fontSize: 16; bold: true; align: center; fill: width; maxLines: 1; background: accent; color: background; radius: 24; padding: [24, 14]; onTap: url("https://store.epicgames.com/free-games") }
     }
   }
 }
