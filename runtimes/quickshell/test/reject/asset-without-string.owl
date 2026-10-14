@@ -1,0 +1,4 @@
+widget {
+  asset logo = base64 1
+  Text { text: 1 }
+}

@@ -1,5 +1,5 @@
 widget "cal" {
-  meta { owl: 9; icon: "calendar"; description: "The month at a glance, synced with a Google or phone calendar if you like: tap a day for its events, add one at a time or for the day, page through the months."; version: "5.1"; license: "MIT"; category: "time" }
+  meta { owl: 9; icon: "calendar"; description: "The month at a glance, synced with a Google or phone calendar if you like: tap a day for its events, add one at a time or for the day, page through the months."; version: "5.2"; license: "MIT"; category: "time" }
   size: 3x2
 
   source now = clock every 60s
@@ -177,46 +177,50 @@ widget "cal" {
         align: bottomEnd
         Column {
           gap: 0
-          fill: true
+          fill: width
           scroll: true
-          background: surface; radius: 28; clip: true
-          for e, n in dayItems {
-            Spacer { height: 1; fill: width; background: border; visible: n > 0 }
-            Row {
-              gap: 16
-              align: center
-              padding: [20, 14]
-              // Into the form, to change or delete it; one of a repeating series in the calendar app, which asks
-              // whether to change just this one.
-              onTap: {
-                if e.recurring {
-                  url("content://com.android.calendar/events/${e.id}")
-                } else {
-                  editing = e.i
-                  editingId = e.id ?? 0
-                  draft = e.title
-                  timeText = e.allDay ? "" : fmtTime(e.start, "HH:mm")
-                  endText = e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm")
-                  adding = true
+          // As tall as what it lists, as Google's lists are; the room after it keeps the add button off the last one.
+          Column {
+            gap: 0
+            fill: width
+            background: surface; radius: 28; clip: true
+            for e, n in dayItems {
+              Spacer { height: 1; fill: width; background: border; visible: n > 0 }
+              Row {
+                gap: 16
+                align: center
+                padding: [20, 14]
+                // Into the form, to change or delete it; one of a repeating series in the calendar app, which asks
+                // whether to change just this one.
+                onTap: {
+                  if e.recurring {
+                    url("content://com.android.calendar/events/${e.id}")
+                  } else {
+                    editing = e.i
+                    editingId = e.id ?? 0
+                    draft = e.title
+                    timeText = e.allDay ? "" : fmtTime(e.start, "HH:mm")
+                    endText = e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm")
+                    adding = true
+                  }
+                }
+                // When, as Google's calendar lists it: the start over the end.
+                Column {
+                  gap: 0
+                  width: 60
+                  Text { text: e.allDay ? "All day" : fmtTime(e.start, "HH:mm"); fontSize: 16; color: muted }
+                  Text { text: e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm"); fontSize: 14; color: muted; visible: !e.allDay && e.end != null }
+                }
+                Column {
+                  gap: 0
+                  weight: 1
+                  Text { text: e.title; fontSize: 16 }
+                  Text { text: e.sub ?? ""; fontSize: 14; color: muted; visible: e.sub != null }
                 }
               }
-              // When, as Google's calendar lists it: the start over the end.
-              Column {
-                gap: 0
-                width: 60
-                Text { text: e.allDay ? "All day" : fmtTime(e.start, "HH:mm"); fontSize: 16; color: muted }
-                Text { text: e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm"); fontSize: 14; color: muted; visible: !e.allDay && e.end != null }
-              }
-              Column {
-                gap: 0
-                weight: 1
-                Text { text: e.title; fontSize: 16 }
-                Text { text: e.sub ?? ""; fontSize: 14; color: muted; visible: e.sub != null }
-              }
             }
+            if len(dayItems) == 0 { Text { text: "Nothing planned."; fontSize: 16; color: muted; padding: [20, 16] } }
           }
-          if len(dayItems) == 0 { Text { text: "Nothing planned."; fontSize: 16; color: muted; padding: [20, 16] } }
-          // Room at the end, so the add button never covers the last event.
           Spacer { height: 80 }
         }
         // Adding, as Google's apps do: a button over the list's corner, opening the form in a sheet.

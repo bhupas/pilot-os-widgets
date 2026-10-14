@@ -1,0 +1,4 @@
+widget {
+  Text { text: 1 }
+}
+}

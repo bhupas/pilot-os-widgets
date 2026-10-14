@@ -1,0 +1,5 @@
+widget {
+  let a = 1
+  state a = 2
+  Text { text: a }
+}

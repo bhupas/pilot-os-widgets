@@ -6,11 +6,12 @@
 # walk.js does the same walk with Owl.js. They must print the same JSON, numbers
 # alike to 1e-9:
 #
-#   edge.owl                198 expressions chosen to break a port
+#   edge.owl                208 expressions chosen to break a port
 #   <widget>.fixture.json   store widgets with the data their sources gave once
 #   every store widget      with no source data at all
 #
-# and `owl check` and Owl.js must accept and reject the same files.
+# and `owl check` and Owl.js must accept and reject the same files, reject/*.owl
+# among them, each failing with a message of its own.
 #
 # Needs java (17+), javac and node. The expected output is never stored:
 # it comes from the jar in this repo, so a new owl.jar is checked as it lands.
@@ -91,8 +92,9 @@ mine=$(node -e '
     const src = fs.readFileSync(f, "utf8")
     try { m.exports.compile(src); console.log("OK  " + f) }
     catch (e) { console.log("ERR " + f + ":" + m.exports.formatError(src, e).split("\n")[0]) }
-  }' "$owl" "$repo"/widgets/*/*/widget.owl "$here/edge.owl" | sort)
-theirs=$(java "${java_opts[@]}" -cp "$jar" dev.omalauncher.widgets.cli.MainKt check "$repo"/widgets/*/*/widget.owl "$here/edge.owl" 2>&1 |
+  }' "$owl" "$repo"/widgets/*/*/widget.owl "$here/edge.owl" "$here"/reject/*.owl | sort)
+# owl check exits 1 for the reject cases; what it printed is what counts.
+theirs=$({ java "${java_opts[@]}" -cp "$jar" dev.omalauncher.widgets.cli.MainKt check "$repo"/widgets/*/*/widget.owl "$here/edge.owl" "$here"/reject/*.owl 2>&1 || true; } |
   grep -E '^(ok|ERR)' | sed -E 's/^ok  ([^ ]+).*/OK  \1/' | sort)
 if [ "$mine" = "$theirs" ]; then
   echo "ok - owl check and Owl.js agree on every widget"

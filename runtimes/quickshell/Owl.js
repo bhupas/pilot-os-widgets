@@ -569,8 +569,8 @@ Parser.prototype = {
   isId: function(tok, w) { return tok.type === T_IDENT && tok.text === w },
   desc: function(tok) { return tok.type === T_EOF ? "end of file" : tok.type === T_STR ? "string" : "'" + tok.text + "'" },
   fail: function(msg, at) { throw new CompileError(msg, (at || this.t()).pos) },
-  expect: function(type) {
-    if (this.t().type !== type) this.fail("expected " + (type === T_EOF ? "eof" : type) + ", found " + this.desc(this.t()))
+  expect: function(type, what) {
+    if (this.t().type !== type) this.fail("expected " + what + ", found " + this.desc(this.t()))
   },
   punct: function(s) {
     if (!this.isP(this.t(), s)) this.fail("expected '" + s + "', found " + this.desc(this.t()))
@@ -596,7 +596,7 @@ Parser.prototype = {
     this.punct("{")
     var body = this.body(true)
     this.punct("}")
-    this.expect(T_EOF)
+    this.expect(T_EOF, "end of file")
     return { name: name, body: body }
   },
 
@@ -740,7 +740,7 @@ Parser.prototype = {
     if (kw.text === "asset") {
       if (!this.isId(this.t(), "base64")) this.fail("expected base64\"...\"")
       this.next()
-      this.expect(T_STR)
+      this.expect(T_STR, "a string")
       return { kind: "asset", name: name, base64: this.literalString(this.next()).replace(/\s/g, ""), pos: kw.pos }
     }
     var e = this.expr()
@@ -831,7 +831,12 @@ Parser.prototype = {
       if (this.isP(this.t(), ".")) {
         this.next()
         var open = this.t()
-        var name = this.t().type === T_NUM ? this.next().text : this.ident("field name")
+        if (open.type === T_NUM) {
+          // list.0 as well as obj.field; list.0.1 lexes as the number 0.1, so it's two steps.
+          this.next().text.split(".").forEach(function(step) { e = { k: "member", e: e, name: step, pos: open.pos } })
+          continue
+        }
+        var name = this.ident("field name")
         if (this.isP(this.t(), "(") && !this.t().nl) {
           var a = this.args()
           e = { k: "call", name: name, args: [e].concat(a[0]), named: a[1], pos: open.pos }
@@ -955,7 +960,7 @@ Parser.prototype = {
       if (part.lit !== undefined) return { k: "lit", v: part.lit, pos: tok.pos }
       var sub = new Parser(self.src, lex(self.src, part.code[0], part.code[1]))
       var e = sub.expr()
-      sub.expect(T_EOF)
+      sub.expect(T_EOF, "'}'")
       return e
     })
     return { k: "interp", parts: parts, pos: tok.pos }
@@ -1373,24 +1378,19 @@ function parseTime(text, pattern) {
 function math(f) { return { min: 1, max: 1, pure: true, impl: strict(function(a) { return f(a.num(0)) }) } }
 function B(min, max, impl, pure) { return { min: min, max: max, pure: pure === undefined ? true : pure, impl: impl } }
 
+// What min and max pick from: a list, or several arguments, skipping what isn't a number (null, while loading).
+function numbers(a) { return (a.size === 1 ? a.list(0) : a.args).map(num).filter(function(n) { return n !== null }) }
+
 function callFn(f, args) { return f.call(args) }
 
 var BUILTINS = {
   min: B(1, 16, function(a) {
-    if (a.size === 1) {
-      var ns = a.list(0).map(num).filter(function(n) { return n !== null })
-      return ns.length ? ns.reduce(function(p, q) { return Math.min(p, q) }) : null
-    }
-    return a.args.map(function(v) { var n = num(v); return n === null ? Number.MAX_VALUE : n })
-      .reduce(function(p, q) { return Math.min(p, q) })
+    var ns = numbers(a)
+    return ns.length ? ns.reduce(function(p, q) { return Math.min(p, q) }) : null
   }),
   max: B(1, 16, function(a) {
-    if (a.size === 1) {
-      var ns = a.list(0).map(num).filter(function(n) { return n !== null })
-      return ns.length ? ns.reduce(function(p, q) { return Math.max(p, q) }) : null
-    }
-    return a.args.map(function(v) { var n = num(v); return n === null ? -Number.MAX_VALUE : n })
-      .reduce(function(p, q) { return Math.max(p, q) })
+    var ns = numbers(a)
+    return ns.length ? ns.reduce(function(p, q) { return Math.max(p, q) }) : null
   }),
   clamp: B(3, 3, function(a) { return clampNum(a.num(0), a.num(1), a.num(2)) }),
   lerp: B(3, 3, function(a) { return a.num(0) + (a.num(1) - a.num(0)) * a.num(2) }),
@@ -2011,6 +2011,8 @@ Compiler.prototype = {
   reserve: function(name, pos) {
     if (THEME.indexOf(name) >= 0 || CONSTANTS.hasOwnProperty(name) || name === "time")
       this.fail("'" + name + "' is a built-in name", pos)
+    // Lets are reserved after the first pass's check, so one named like a later state or another let gets here.
+    if (this.slots.hasOwnProperty(name)) this.fail("'" + name + "' is already declared", pos)
     this.slots[name] = this.globals.length
     this.globals.push(null)
     return this.globals.length - 1
