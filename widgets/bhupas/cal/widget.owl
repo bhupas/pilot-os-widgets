@@ -1,5 +1,5 @@
 widget "cal" {
-  meta { owl: 9; icon: "calendar"; description: "The month at a glance, synced with a Google or phone calendar if you like: tap a day for its events, add one at a time or for the day, page through the months."; version: "5.0"; license: "MIT"; category: "time" }
+  meta { owl: 9; icon: "calendar"; description: "The month at a glance, synced with a Google or phone calendar if you like: tap a day for its events, add one at a time or for the day, page through the months."; version: "5.1"; license: "MIT"; category: "time" }
   size: 3x2
 
   source now = clock every 60s
@@ -9,7 +9,8 @@ widget "cal" {
   state picked = ""               // the day tapped, yyyy-MM-dd; today until then
   state events = [] persist       // kept here, while not synced: [{day: "2026-10-11", text, time: "09:30" or "" for the day}]
   state syncTo = 0 persist        // the phone calendar it syncs with, by id; 0 keeps events here only
-  state timeText = ""             // the event's time as typed: "14:30", "1430", "9"; empty for the whole day
+  state timeText = ""             // when the event starts, as typed: "14:30", "1430", "9"; empty for the whole day
+  state endText = ""              // and ends; empty for an hour after it starts
   state choosing = false          // the calendars to sync with are listed
   state adding = false            // the event form is open
   state editing = -1              // the event kept here it changes, by its place in events; -1 for none
@@ -36,17 +37,26 @@ widget "cal" {
   let synced = syncCal == null ? [] : (phone.events ?? []).filter(e => e.calendarId == syncTo).map(e => {id: e.id, recurring: e.recurring, title: e.title, allDay: e.allDay, start: e.allDay ? e.start - offset : e.start, end: e.end, location: e.location})
   let writes = syncCal != null && phone.canWrite == true
   // Those kept here, as times: a day's at its midnight.
-  let mine = events.map(e => {i: events.indexOf(e), title: e.text, day: e.day, allDay: (e.time ?? "") == "", start: (e.time ?? "") == "" ? parseTime(e.day, "yyyy-MM-dd") : parseTime("${e.day} ${e.time}", "yyyy-MM-dd HH:mm")})
+  let mine = events.map(e => {i: events.indexOf(e), title: e.text, day: e.day, allDay: (e.time ?? "") == "",
+    start: (e.time ?? "") == "" ? parseTime(e.day, "yyyy-MM-dd") : parseTime("${e.day} ${e.time}", "yyyy-MM-dd HH:mm"),
+    end: (e.time ?? "") == "" ? null : (e.end ?? "") == "" ? parseTime("${e.day} ${e.time}", "yyyy-MM-dd HH:mm") + 3600 : parseTime("${e.day} ${e.end}", "yyyy-MM-dd HH:mm")})
   let marked = mine.map(e => e.day) + synced.map(e => fmtTime(e.start, "yyyy-MM-dd"))
   // The day's events, synced and kept here together: the day's first, then by time.
-  let dayItems = (synced.filter(e => fmtTime(e.start, "yyyy-MM-dd") == sel).map(e => {i: -1, id: e.id, recurring: e.recurring, title: e.title, allDay: e.allDay, start: e.start, sub: e.location})
-    + mine.filter(e => e.day == sel).map(e => {i: e.i, id: null, recurring: false, title: e.title, allDay: e.allDay, start: e.start, sub: null})).sortBy(e => e.allDay ? 0 : e.start)
+  let dayItems = (synced.filter(e => fmtTime(e.start, "yyyy-MM-dd") == sel).map(e => {i: -1, id: e.id, recurring: e.recurring, title: e.title, allDay: e.allDay, start: e.start, end: e.end, sub: e.location})
+    + mine.filter(e => e.day == sel).map(e => {i: e.i, id: null, recurring: false, title: e.title, allDay: e.allDay, start: e.start, end: e.end, sub: null})).sortBy(e => e.allDay ? 0 : e.start)
   // The form's time, from what's typed: "HH:mm", or "" for the whole day (or while it isn't a time yet).
   let typed = match(timeText, '^\s*(\d{1,2})(?:[:.\s]?(\d{2}))?\s*$')
   let hh = typed == null ? -1 : num(typed[0], -1)
   let mm = typed == null ? 0 : num(typed[1] ?? "0", 0)
   let at = hh >= 0 && hh < 24 && mm < 60 ? pad(hh, 2, "0") + ":" + pad(mm, 2, "0") : ""
   let start = at == "" ? parseTime(sel, "yyyy-MM-dd") : parseTime("${sel} ${at}", "yyyy-MM-dd HH:mm")
+  // When it ends, typed the same way; an hour after it starts until then, and never before it.
+  let typedEnd = match(endText, '^\s*(\d{1,2})(?:[:.\s]?(\d{2}))?\s*$')
+  let eh = typedEnd == null ? -1 : num(typedEnd[0], -1)
+  let em = typedEnd == null ? 0 : num(typedEnd[1] ?? "0", 0)
+  let typedFinish = eh >= 0 && eh < 24 && em < 60 && at != "" ? parseTime("${sel} ${pad(eh, 2, "0")}:${pad(em, 2, "0")}", "yyyy-MM-dd HH:mm") : null
+  let finish = at == "" ? null : typedFinish != null && typedFinish > start ? typedFinish : start + 3600
+  let until = finish == null ? "" : fmtTime(finish, "HH:mm")
 
   // The tile: the coming seven days as a strip, today on the accent and a dot under each day with something on,
   // then what's next. The date itself is in the clock above.
@@ -54,12 +64,12 @@ widget "cal" {
   let weekDays = week.map(t => fmtTime(t, "yyyy-MM-dd"))
   // This week's, synced and kept here, soonest first, those over already left out.
   let thisWeek = synced.filter(e => weekDays.indexOf(fmtTime(e.start, "yyyy-MM-dd")) >= 0)
-    + mine.filter(e => weekDays.indexOf(e.day) >= 0).map(e => {title: e.title, allDay: e.allDay, start: e.start, end: e.allDay ? null : e.start + 3600})
+    + mine.filter(e => weekDays.indexOf(e.day) >= 0).map(e => {title: e.title, allDay: e.allDay, start: e.start, end: e.end})
   let next = thisWeek.filter(e => e.end == null || e.end > now).sortBy(e => e.start).map(e => {
     title: e.title,
     day: fmtTime(e.start, "yyyy-MM-dd"),
     soon: !e.allDay && e.start - now < 3600,
-    when: !e.allDay && e.start <= now ? "Now · until ${fmtTime(e.end, "HH:mm")}" : !e.allDay && e.start - now < 3600 ? "In ${max(round((e.start - now) / 60), 1)} min" : (fmtTime(e.start, "yyyy-MM-dd") == today ? "Today" : fmtTime(e.start, "yyyy-MM-dd") == weekDays[1] ? "Tomorrow" : fmtTime(e.start, "EEEE")) + (e.allDay ? "" : " · " + fmtTime(e.start, "HH:mm"))
+    when: !e.allDay && e.start <= now ? "Now · until ${fmtTime(e.end, "HH:mm")}" : !e.allDay && e.start - now < 3600 ? "In ${max(round((e.start - now) / 60), 1)} min" : (fmtTime(e.start, "yyyy-MM-dd") == today ? "Today" : fmtTime(e.start, "yyyy-MM-dd") == weekDays[1] ? "Tomorrow" : fmtTime(e.start, "EEEE")) + (e.allDay ? "" : " · " + fmtTime(e.start, "HH:mm") + "–" + fmtTime(e.end, "HH:mm"))
   })
   let busy = next.map(e => e.day)
 
@@ -186,10 +196,17 @@ widget "cal" {
                   editingId = e.id ?? 0
                   draft = e.title
                   timeText = e.allDay ? "" : fmtTime(e.start, "HH:mm")
+                  endText = e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm")
                   adding = true
                 }
               }
-              Text { text: e.allDay ? "All day" : fmtTime(e.start, "HH:mm"); fontSize: 16; color: muted; width: 60 }
+              // When, as Google's calendar lists it: the start over the end.
+              Column {
+                gap: 0
+                width: 60
+                Text { text: e.allDay ? "All day" : fmtTime(e.start, "HH:mm"); fontSize: 16; color: muted }
+                Text { text: e.allDay || e.end == null ? "" : fmtTime(e.end, "HH:mm"); fontSize: 14; color: muted; visible: !e.allDay && e.end != null }
+              }
               Column {
                 gap: 0
                 weight: 1
@@ -207,7 +224,7 @@ widget "cal" {
           padding: 16
           Box {
             size: 56; radius: 16; align: center; background: accent
-            onTap: { adding = true; editing = -1; editingId = 0; draft = ""; timeText = "" }
+            onTap: { adding = true; editing = -1; editingId = 0; draft = ""; timeText = ""; endText = "" }
             Text { text: "+"; fontSize: 32; color: background; align: center; fill: width }
           }
         }
@@ -268,13 +285,13 @@ widget "cal" {
                 draft = value
                 if draft != "" {
                   if editingId != 0 {
-                    editEvent(editingId, draft, start, null, at == "")
+                    editEvent(editingId, draft, start, finish, at == "")
                   } else if editing >= 0 {
-                    events = events.take(editing) + [{day: sel, text: draft, time: at}] + events.drop(editing + 1)
+                    events = events.take(editing) + [{day: sel, text: draft, time: at, end: until}] + events.drop(editing + 1)
                   } else if writes {
-                    addEvent(draft, start, null, at == "", syncTo)
+                    addEvent(draft, start, finish, at == "", syncTo)
                   } else {
-                    events = events + [{day: sel, text: draft, time: at}]
+                    events = events + [{day: sel, text: draft, time: at, end: until}]
                   }
                 }
                 adding = false; editing = -1; editingId = 0; draft = ""
@@ -284,10 +301,11 @@ widget "cal" {
             Row {
               gap: 12
               align: center
-              Text { text: "All day"; fontSize: 15; color: at == "" ? background : foreground; background: at == "" ? accent : transparent; border: at == "" ? 0 : 1; borderColor: border; radius: 20; padding: [16, 10]; onTap: timeText = "" }
-              Text { text: "or at"; fontSize: 15; color: muted }
-              Input { text: timeText; placeholder: "14:30"; keyboard: "number"; fontSize: 18; width: 96; color: timeText != "" && at == "" ? red : foreground; onChange: timeText = value }
+              Text { text: "All day"; fontSize: 15; color: at == "" ? background : foreground; background: at == "" ? accent : transparent; border: at == "" ? 0 : 1; borderColor: border; radius: 20; padding: [16, 10]; onTap: { timeText = ""; endText = "" } }
               Spacer { weight: 1 }
+              Input { text: timeText; placeholder: "Start"; keyboard: "number"; fontSize: 18; width: 76; color: timeText != "" && at == "" ? red : foreground; onChange: timeText = value }
+              Text { text: "–"; fontSize: 18; color: muted }
+              Input { text: endText; placeholder: until == "" ? "End" : until; keyboard: "number"; fontSize: 18; width: 76; color: endText != "" && typedFinish == null ? red : foreground; onChange: endText = value }
             }
             Row {
               gap: 8
@@ -312,13 +330,13 @@ widget "cal" {
                 onTap: {
                   if draft != "" {
                     if editingId != 0 {
-                      editEvent(editingId, draft, start, null, at == "")
+                      editEvent(editingId, draft, start, finish, at == "")
                     } else if editing >= 0 {
-                      events = events.take(editing) + [{day: sel, text: draft, time: at}] + events.drop(editing + 1)
+                      events = events.take(editing) + [{day: sel, text: draft, time: at, end: until}] + events.drop(editing + 1)
                     } else if writes {
-                      addEvent(draft, start, null, at == "", syncTo)
+                      addEvent(draft, start, finish, at == "", syncTo)
                     } else {
-                      events = events + [{day: sel, text: draft, time: at}]
+                      events = events + [{day: sel, text: draft, time: at, end: until}]
                     }
                   }
                   adding = false; editing = -1; editingId = 0; draft = ""

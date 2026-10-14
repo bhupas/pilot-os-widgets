@@ -123,6 +123,9 @@ Item {
       case "Terminal": return terminalC
       case "Slider": return sliderC
       case "Input": return inputC
+      // shortcut: a Sheet shows in place, as a column, where the phone opens it over the screen; a modal panel
+      // with Back and a swipe to close would make it the same here.
+      case "Sheet": return columnC
       default: return null
       }
     }

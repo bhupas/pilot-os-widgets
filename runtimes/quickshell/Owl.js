@@ -757,9 +757,11 @@ Parser.prototype = {
     return d
   },
 
-  handler: function() {
-    if (!this.isP(this.t(), "{")) return [this.stmt()]
-    this.next()
+  handler: function() { return this.isP(this.t(), "{") ? this.block() : [this.stmt()] },
+
+  // `{ a; b }`: statements, separated by `;` or new lines.
+  block: function() {
+    this.punct("{")
     var out = []
     while (!this.isP(this.t(), "}")) {
       if (this.accept(";")) continue
@@ -769,8 +771,22 @@ Parser.prototype = {
     return out
   },
 
+  // `if cond { ... } else { ... }` in a handler (owl 9).
+  ifStmt: function() {
+    var pos = this.next().pos
+    var cond = this.expr()
+    var then = this.block()
+    var orElse = []
+    if (this.isId(this.t(), "else")) {
+      this.next()
+      orElse = this.isId(this.t(), "if") ? [this.ifStmt()] : this.block()
+    }
+    return { kind: "if", cond: cond, then: then, orElse: orElse, pos: pos }
+  },
+
   stmt: function() {
     var start = this.t()
+    if (this.isId(start, "if")) return this.ifStmt()
     if (start.type === T_IDENT && this.isP(this.peek(), "=")) {
       this.next()
       this.next()
@@ -963,7 +979,8 @@ var CONSTANTS = { pi: Math.PI, transparent: new Col(null, 0, 1) }
 var ACTIONS = {
   terminal: [1, 2], app: [1, 1], run: [1, 1], url: [1, 1], launcher: [1, 1], refresh: [0, 1],
   media: [1, 1], androidApp: [1, 1], copy: [1, 1], notify: [1, 2], volume: [1, 1],
-  notification: [2, 2], screen: [0, 0], close: [0, 0], torch: [1, 1], share: [1, 1], haptic: [0, 0]
+  notification: [2, 2], screen: [0, 0], close: [0, 0], torch: [1, 1], share: [1, 1], haptic: [0, 0],
+  addEvent: [2, 5], editEvent: [3, 5], deleteEvent: [1, 1]
 }
 
 function Args(args, host) {
@@ -1281,6 +1298,60 @@ function splitStr(s, sep) {
 }
 
 function strict(f) { return function(a) { return a.get(0) === null ? null : f(a) } }
+
+// Unix seconds for `text` read with java's `pattern` in the local time zone, midnight when it has no time; null
+// if it doesn't fit. The numeric fields widgets use (y, M, d, H, m, s), read as java's smart resolver does: a
+// day past the month's end is its last day, and 24:00 the next day's midnight.
+function parseTime(text, pattern) {
+  var fields = [], i = 0
+  while (i < pattern.length) {
+    var ch = pattern[i]
+    if (ch === "'") {
+      var j = pattern.indexOf("'", i + 1)
+      if (j < 0) throw new Error("unclosed quote")
+      fields.push({ lit: j === i + 1 ? "'" : pattern.slice(i + 1, j) })
+      i = j + 1
+    } else if (/[A-Za-z]/.test(ch)) {
+      var n = 1
+      while (pattern[i + n] === ch) n++
+      if ("yMdHms".indexOf(ch) < 0 || n > 4 || (ch !== "y" && n > 2)) throw new Error("unsupported field " + ch)
+      fields.push({ f: ch, n: n })
+      i += n
+    } else {
+      fields.push({ lit: ch })
+      i++
+    }
+  }
+  var t = text.trim(), p = 0, v = {}
+  for (var k = 0; k < fields.length; k++) {
+    var fd = fields[k]
+    if (fd.lit !== undefined) {
+      if (t.substr(p, fd.lit.length) !== fd.lit) return null
+      p += fd.lit.length
+      continue
+    }
+    var min = fd.n === 1 ? 1 : fd.f === "y" && fd.n > 2 ? 4 : fd.n
+    var max = fd.n === 1 || (fd.f === "y" && fd.n > 2) ? 19 : fd.n
+    // A variable-width field leaves the digits the fixed ones right after it need.
+    var reserve = 0
+    for (var r = k + 1; r < fields.length && fields[r].f !== undefined && fields[r].n > 1 && fields[r].f !== "y"; r++) reserve += fields[r].n
+    var digits = /^\d*/.exec(t.slice(p))[0]
+    var take = Math.min(digits.length - (max > min ? reserve : 0), max)
+    if (take < min) return null
+    var value = parseInt(digits.slice(0, take), 10)
+    if (fd.f === "y" && fd.n === 2) value += 2000
+    v[fd.f] = value
+    p += take
+  }
+  if (p !== t.length || v.y === undefined || v.M === undefined || v.d === undefined) return null
+  var h = v.H === undefined ? 0 : v.H, mi = v.m === undefined ? 0 : v.m, se = v.s === undefined ? 0 : v.s
+  if (v.M < 1 || v.M > 12 || v.d < 1 || v.d > 31 || h > 24 || mi > 59 || se > 59) return null
+  if (h === 24 && (mi > 0 || se > 0)) return null
+  var last = new Date(v.y, v.M, 0).getDate()
+  var date = new Date(v.y, v.M - 1, Math.min(v.d, last), h, mi, se)
+  if (v.y < 100) date.setFullYear(v.y)
+  return date.getTime() / 1000
+}
 function math(f) { return { min: 1, max: 1, pure: true, impl: strict(function(a) { return f(a.num(0)) }) } }
 function B(min, max, impl, pure) { return { min: min, max: max, pure: pure === undefined ? true : pure, impl: impl } }
 
@@ -1386,6 +1457,10 @@ var BUILTINS = {
   fmtTime: B(2, 2, strict(function(a) {
     try { return fmtTime(a.num(0), a.str(1)) } catch (e) { throw new WidgetError("bad time pattern '" + a.str(1) + "'") }
   })),
+  // parseTime("2026-12-25", "yyyy-MM-dd"): fmtTime's other way round, Unix seconds or null.
+  parseTime: B(2, 2, function(a) {
+    try { return parseTime(a.str(0), a.str(1)) } catch (e) { throw new WidgetError("bad time pattern '" + a.str(1) + "'") }
+  }),
   weatherIcon: B(1, 2, function(a) { return weatherIcon(a.int(0, 0), truthy(a.get(1))) }),
   match: B(2, 2, function(a) {
     var m = regex(a.str(1)).exec(a.str(0))
@@ -1615,7 +1690,7 @@ var OPERATORS = {
 
 // ---------------------------------------------------------------- compiler
 
-var LEVEL = 7
+var LEVEL = 9
 var MAX_NODES = 500
 var MAX_SCREEN_NODES = 1000
 var MAX_ASSET_BYTES = 2097152
@@ -1637,7 +1712,9 @@ var KINDS = {
   Spacer: [[], "none"],
   Terminal: [["command", "fontSize"], "none"],
   Slider: [["value", "min", "max", "step", "color", "track", "live"], "none"],
-  Input: [["text", "placeholder", "color", "fontSize", "clear"], "none"]
+  Input: [["text", "placeholder", "color", "fontSize", "clear", "focus", "keyboard"], "none"],
+  // owl 9: a bottom sheet over a screen, for a form or choices; shown while it's in the tree.
+  Sheet: [["title"], "ui"]
 }
 var KIND_NAMES = Object.keys(KINDS)
 var COMMON = ["width", "height", "size", "fill", "weight", "padding", "background", "border", "borderColor",
@@ -1651,7 +1728,9 @@ var ENUMS = {
   fit: ["contain", "cover", "fill"],
   font: ["mono", "sans", "serif", "icon"],
   fill: ["width", "height"],
-  cap: ["round", "butt", "square"]
+  cap: ["round", "butt", "square"],
+  // Input's: digits for numbers and times typed (owl 9).
+  keyboard: ["text", "number"]
 }
 var ENUM_WORDS = []
 for (var ek in ENUMS) ENUM_WORDS = ENUM_WORDS.concat(ENUMS[ek])
@@ -1671,14 +1750,19 @@ var SINCE = { Terminal: 2, sprite: 3 }
 // owl 6: values in commands, quoted, and the launcher's corner style.
 SINCE.sh = 6
 SINCE.corners = 6
+SINCE["Input.focus"] = 6
 // owl 7: more of the phone: the next alarm, its modes, the torch, the share sheet, haptics.
 ;["android.alarm", "android.modes", "torch", "share", "haptic"].forEach(function(k) { SINCE[k] = 7 })
+// owl 8: the phone's calendar, and dates the user types or picks, as times.
+;["android.calendar", "parseTime"].forEach(function(k) { SINCE[k] = 8 })
+// owl 9: sheets, branching handlers, Back through a screen's pages, and adding to the phone's calendar.
+;["addEvent", "editEvent", "deleteEvent", "Sheet", "if in a handler", "onBack", "Input.keyboard"].forEach(function(k) { SINCE[k] = 9 })
 
 var MANAGERS = { pacman: /^[a-z0-9@_+][a-z0-9@._+-]*$/ }
-var HANDLER_PARAMS = { onTap: ["x", "y"], onDrag: ["dx", "dy", "x", "y"], onChange: ["value"], onSubmit: ["value"] }
-var HANDLER_KINDS = { onChange: ["Slider", "Input"], onSubmit: ["Input"] }
+var HANDLER_PARAMS = { onTap: ["x", "y"], onDrag: ["dx", "dy", "x", "y"], onChange: ["value"], onSubmit: ["value"], onDismiss: [] }
+var HANDLER_KINDS = { onChange: ["Slider", "Input"], onSubmit: ["Input"], onDismiss: ["Sheet"] }
 var TRIGGER_PARAMS = { on: ["value", "old"] }
-var ANDROID = ["battery", "device", "media", "notifications", "volume", "system", "alarm", "modes"]
+var ANDROID = ["battery", "device", "media", "notifications", "volume", "system", "alarm", "modes", "calendar"]
 var MEDIA = ["toggle", "play", "pause", "next", "previous", "open"]
 var VOLUME = ["up", "down", "mute", "unmute", "toggle"]
 var TORCH = ["on", "off", "toggle"]
@@ -1768,6 +1852,8 @@ function Compiler(ast) {
   this.maxNodes = MAX_NODES
   this.screenAction = null
   this.needs = null
+  // Whether nodes being compiled are the screen's (true), the tile's (false) or a component's (null).
+  this.inScreen = null
 }
 
 function messageOf(e) {
@@ -1838,6 +1924,7 @@ Compiler.prototype = {
     var requires = this.requires(reqFields)
     var screens = body.items.filter(function(it) { return it.kind === "node" && it.type === "screen" })
     if (screens.length > 1) this.fail("a widget has one screen { }", screens[1].pos)
+    this.inScreen = false
     var rootNodes = this.items(body.items.filter(function(it) { return screens.indexOf(it) < 0 }), this.root, "ui")
     if (!rootNodes.length) this.fail("a widget needs at least one node, like Text { text: \"hi\" }", 0)
     var tileNodes = this.nodes
@@ -1866,6 +1953,7 @@ Compiler.prototype = {
       root: rootNodes,
       screen: screen ? screen[0] : null,
       screenTitle: screen ? screen[1] : null,
+      screenBack: screen ? screen[2] : null,
       onTap: onTap,
       triggers: triggers,
       commands: this.commands,
@@ -1884,13 +1972,22 @@ Compiler.prototype = {
     body.props.forEach(function(p) {
       if (p.name !== "title") self.fail("a screen only takes title (its nodes go inside it)", p.pos)
     })
-    if (body.handlers.length) this.fail("handlers go on the nodes inside a screen", body.handlers[0].pos)
+    body.handlers.forEach(function(h) {
+      if (h.name !== "onBack") self.fail("a screen only takes onBack; other handlers go on the nodes inside it", h.pos)
+    })
+    // Back on a screen with pages of its own: back a page, or close() on the first.
+    var back = null
+    if (body.handlers.length) {
+      this.since("onBack", body.handlers[0].pos)
+      back = this.handler(body.handlers[0], this.root, [])
+    }
     if (body.animations.length) this.fail("animate belongs inside a node", body.animations[0].pos)
     this.nodes = 0
     this.maxNodes = MAX_SCREEN_NODES
+    this.inScreen = true
     var tree = this.items(body.items, this.root, "ui")
     if (!tree.length) this.fail("a screen needs at least one node", n.pos)
-    return [tree, body.props.length ? this.ex(body.props[0].value, this.root) : null]
+    return [tree, body.props.length ? this.ex(body.props[0].value, this.root) : null, back]
   },
 
   reserve: function(name, pos) {
@@ -2172,6 +2269,9 @@ Compiler.prototype = {
       if (kind[0].indexOf(p.name) < 0 && COMMON.indexOf(p.name) < 0)
         self.fail(n.type + " has no property '" + p.name + "' (" + kind[0].concat(COMMON).join(", ") + ")", p.pos)
       if (props.hasOwnProperty(p.name)) self.fail("'" + p.name + "' is set twice", p.pos)
+      // On a tile it would raise the keyboard whenever its page shows; in a component the launcher ignores it there.
+      if (p.name === "focus" && self.inScreen === false) self.fail("focus only works in a screen { }", p.pos)
+      self.since(n.type + "." + p.name, p.pos)
       props[p.name] = self.prop(p, scope)
     })
     var handlers = {}
@@ -2188,6 +2288,11 @@ Compiler.prototype = {
       animations[a.name] = self.ex(a.value, scope)
     })
     this.since(n.type, n.pos)
+    if (n.type === "Sheet") {
+      // On a tile it would cover home; and Back, a swipe down or a tap beside it must be able to close it.
+      if (this.inScreen === false) this.fail("a Sheet only opens in a screen { }", n.pos)
+      if (!handlers.hasOwnProperty("onDismiss")) this.fail("a Sheet needs onDismiss, to close it when it's swiped away or Back is pressed", n.pos)
+    }
     if (n.type === "Terminal") {
       this.terminal = true
       var command = props.command
@@ -2239,7 +2344,32 @@ Compiler.prototype = {
     var self = this
     var params = paramsIn || HANDLER_PARAMS[h.name] || []
     var inner = new Scope(scope, params)
-    var stmts = h.stmts.map(function(s) {
+    var stmts = this.statements(h.stmts, inner)
+    var hname = h.name
+    return {
+      params: params,
+      run: function(env, values) {
+        var e = params.length ? env.child(params.map(function(p, i) { return i < values.length ? values[i] : null })) : env
+        try {
+          env.host.budget.run(function() { stmts.forEach(function(s) { s(e) }) })
+        } catch (x) {
+          env.host.report(hname + ": " + messageOf(x))
+        }
+      }
+    }
+  },
+
+  // A handler's statements, each run in turn against the handler's frame.
+  statements: function(list, inner) {
+    var self = this
+    return list.map(function(s) {
+      if (s.kind === "if") {
+        self.since("if in a handler", s.pos)
+        var cond = self.ex(s.cond, inner)
+        var then = self.statements(s.then, inner)
+        var orElse = self.statements(s.orElse, inner)
+        return function(env) { (truthy(run(cond, env)) ? then : orElse).forEach(function(f) { f(env) }) }
+      }
       if (s.kind === "assign") {
         var slot = self.slots.hasOwnProperty(s.name) ? self.slots[s.name] : null
         if (slot === null || !self.states.hasOwnProperty(s.name))
@@ -2279,18 +2409,6 @@ Compiler.prototype = {
       var name = c.name
       return function(env) { env.host.act(name, args.map(function(a) { return run(a, env) })) }
     })
-    var hname = h.name
-    return {
-      params: params,
-      run: function(env, values) {
-        var e = params.length ? env.child(params.map(function(p, i) { return i < values.length ? values[i] : null })) : env
-        try {
-          env.host.budget.run(function() { stmts.forEach(function(s) { s(e) }) })
-        } catch (x) {
-          env.host.report(hname + ": " + messageOf(x))
-        }
-      }
-    }
   },
 
   lookup: function(name, scope) {
